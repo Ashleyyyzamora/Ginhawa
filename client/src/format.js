@@ -21,16 +21,53 @@ export const noxLevel = (v) => (v == null ? null : v <= 20 ? 0 : v <= 150 ? 1 : 
 export const pm25Level = (v) =>
   v == null ? null : v <= 9 ? 0 : v <= 35.4 ? 1 : v <= 55.4 ? 2 : v <= 125.4 ? 3 : v <= 225.4 ? 4 : 5;
 
+// `about` is the plain-language explanation shown when a reading is tapped.
 export const METRICS = {
-  pm1: { label: 'PM1.0', unit: 'µg/m³', digits: 1 },
-  pm25: { label: 'PM2.5', unit: 'µg/m³', digits: 1, level: pm25Level, threshold: 'pm25_threshold' },
-  pm4: { label: 'PM4.0', unit: 'µg/m³', digits: 1 },
-  pm10: { label: 'PM10', unit: 'µg/m³', digits: 1 },
-  voc_index: { label: 'VOC index', unit: '', digits: 0, level: vocLevel, threshold: 'voc_threshold' },
-  nox_index: { label: 'NOx index', unit: '', digits: 0, level: noxLevel, threshold: 'nox_threshold' },
-  temperature: { label: 'Temperature', unit: '°C', digits: 1 },
-  humidity: { label: 'Humidity', unit: '%', digits: 0 },
+  pm1: {
+    label: 'PM1.0', unit: 'µg/m³', digits: 1,
+    about: 'Ultra-fine particles smaller than 1 micrometre, mostly from smoke and vehicle exhaust. They can reach deep into the lungs and bloodstream.',
+  },
+  pm25: {
+    label: 'PM2.5', unit: 'µg/m³', digits: 1, level: pm25Level, threshold: 'pm25_threshold',
+    about: 'Fine particles (dust, smoke, exhaust) about 30 times thinner than a hair. They are the main pollutant used for the AQI because they go deep into the lungs. In crowds they rise with vehicles, cooking and stirred-up dust.',
+    scale: [[0, '0–9 Good'], [1, '9.1–35.4 Moderate'], [2, '35.5–55.4 Sensitive groups'], [3, '55.5–125.4 Unhealthy'], [4, '125.5–225.4 Very unhealthy'], [5, '225.5+ Hazardous']],
+  },
+  pm4: {
+    label: 'PM4.0', unit: 'µg/m³', digits: 1,
+    about: 'Particles up to 4 micrometres: a mix of fine and coarser dust. Useful for comparing with PM2.5 and PM10.',
+  },
+  pm10: {
+    label: 'PM10', unit: 'µg/m³', digits: 1,
+    about: 'Coarser particles like road dust, pollen and construction dust. They mostly irritate the nose, throat and eyes.',
+  },
+  voc_index: {
+    label: 'VOC index', unit: '', digits: 0, level: vocLevel, threshold: 'voc_threshold',
+    about: 'Volatile organic compounds: gases from fuel, paint, cleaning products, perfume and cooking. 100 is the normal level the sensor learned for this spot; above 100 means more than usual.',
+    scale: [[0, '1–150 Normal'], [1, '151–250 Elevated'], [3, '251–400 High'], [4, '401–500 Very high']],
+  },
+  nox_index: {
+    label: 'NOx index', unit: '', digits: 0, level: noxLevel, threshold: 'nox_threshold',
+    about: 'Nitrogen oxides, mainly from vehicle engines and burning. 1 is the normal level for this spot; higher values usually mean traffic or idling vehicles nearby.',
+    scale: [[0, '1–20 Normal'], [1, '21–150 Elevated'], [3, '151–300 High'], [4, '301–500 Very high']],
+  },
+  temperature: {
+    label: 'Temperature', unit: '°C', digits: 1,
+    about: 'Air temperature at the sensor. Heat plus crowding makes pollution feel worse and can affect sensitive people.',
+  },
+  humidity: {
+    label: 'Humidity', unit: '%', digits: 0,
+    about: 'Relative humidity. Very humid air can make particle readings slightly higher and feels more stuffy.',
+  },
 };
+
+export const AQI_BANDS = [
+  { level: 0, from: 0, to: 50 },
+  { level: 1, from: 51, to: 100 },
+  { level: 2, from: 101, to: 150 },
+  { level: 3, from: 151, to: 200 },
+  { level: 4, from: 201, to: 300 },
+  { level: 5, from: 301, to: 500 },
+];
 
 export const fmt = (value, digits = 1) => (value == null ? '—' : Number(value).toFixed(digits));
 export const fmtMetric = (metric, value) => fmt(value, METRICS[metric]?.digits ?? 1);

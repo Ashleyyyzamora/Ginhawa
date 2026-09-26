@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, tokenStore, wsUrl } from './api.js';
+import { useUi } from './components/ui.jsx';
+import { METRICS } from './format.js';
 
-// Holds the user's devices and keeps them fresh from the WebSocket stream.
+// Holds all stations (devices) and keeps them fresh from the WebSocket stream.
 const LiveContext = createContext(null);
 
 export function LiveProvider({ children }) {
@@ -9,6 +11,7 @@ export function LiveProvider({ children }) {
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('connecting'); // connecting | live | offline
   const listeners = useRef(new Set());
+  const { toast } = useUi();
 
   const refresh = useCallback(async () => {
     try {
@@ -28,17 +31,28 @@ export function LiveProvider({ children }) {
         ),
       );
     } else if (msg.type === 'alert' || msg.type === 'alert_resolved') {
+      if (msg.type === 'alert') {
+        toast(`${METRICS[msg.alert.metric].label} is high at ${msg.alert.device_name}`, { tone: 'danger', duration: 6000 });
+      }
       const delta = msg.type === 'alert' ? 1 : -1;
       setDevices((list) =>
         list?.map((d) => (d.id === msg.alert.device_id ? { ...d, open_alerts: Math.max(0, d.open_alerts + delta) } : d)),
       );
     } else if (msg.type === 'device_updated') {
       setDevices((list) => list?.map((d) => (d.id === msg.device.id ? { ...d, ...msg.device } : d)));
+    } else if (msg.type === 'device_created') {
+      refresh();
     } else if (msg.type === 'device_deleted') {
       setDevices((list) => list?.filter((d) => d.id !== msg.deviceId));
     }
     for (const fn of listeners.current) fn(msg);
-  }, []);
+  }, [refresh, toast]);
+
+  /** Pull-to-refresh: reload the station list and tell open pages to reload their data. */
+  const refreshAll = useCallback(async () => {
+    await refresh();
+    for (const fn of listeners.current) fn({ type: 'refresh' });
+  }, [refresh]);
 
   useEffect(() => {
     let ws;
@@ -81,7 +95,7 @@ export function LiveProvider({ children }) {
   }, []);
 
   return (
-    <LiveContext.Provider value={{ devices, error, status, refresh, subscribe, setDevices }}>
+    <LiveContext.Provider value={{ devices, error, status, refresh, refreshAll, subscribe, setDevices }}>
       {children}
     </LiveContext.Provider>
   );

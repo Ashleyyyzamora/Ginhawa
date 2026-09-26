@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { config } from './config.js';
+import { config, isDevEmail } from './config.js';
 import { query } from './db.js';
 
 export function signUserToken(user) {
@@ -9,10 +9,10 @@ export function signUserToken(user) {
   });
 }
 
-/** Returns { id, email, name } or throws. */
+/** Returns { id, email, name, isDev } or throws. The dev list is checked on every request. */
 export function verifyUserToken(token) {
   const payload = jwt.verify(token, config.jwtSecret);
-  return { id: payload.sub, email: payload.email, name: payload.name };
+  return { id: payload.sub, email: payload.email, name: payload.name, isDev: isDevEmail(payload.email) };
 }
 
 export function requireUser(req, res, next) {
@@ -25,6 +25,12 @@ export function requireUser(req, res, next) {
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
+}
+
+/** Use after requireUser: only developers (DEV_EMAILS) may continue. */
+export function requireDev(req, res, next) {
+  if (!req.user?.isDev) return res.status(403).json({ error: 'Only developers can manage stations' });
+  next();
 }
 
 export const generateDeviceKey = () => `gnh_${crypto.randomBytes(24).toString('base64url')}`;

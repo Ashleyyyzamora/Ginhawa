@@ -16,7 +16,16 @@ export const config = {
   offlineAfterSeconds: Number(env.OFFLINE_AFTER_SECONDS ?? 120),
   // Used for "hour of day" foot-traffic profiles.
   timezone: env.TZ_NAME ?? 'Asia/Manila',
+  // Developers (comma-separated emails) can add and manage stations. Everyone else can view.
+  devEmails: new Set(
+    (env.DEV_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
+  ),
 };
+
+export const isDevEmail = (email) => config.devEmails.has(String(email).toLowerCase());
 
 if (config.env === 'production' && config.jwtSecret === DEV_SECRET) {
   throw new Error('JWT_SECRET must be set in production');

@@ -25,7 +25,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
-          <Route path="devices/new" element={<AddDevice />} />
+          <Route path="devices/new" element={user.role === 'dev' ? <AddDevice /> : <Navigate to="/" replace />} />
           <Route path="devices/:id" element={<DeviceDetail />} />
           <Route path="devices/:id/settings" element={<DeviceSettings />} />
           <Route path="alerts" element={<Alerts />} />

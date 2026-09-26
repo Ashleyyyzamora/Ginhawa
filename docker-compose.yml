@@ -29,6 +29,7 @@ services:
       DATABASE_URL: postgres://ginhawa:${POSTGRES_PASSWORD:-ginhawa}@db:5432/ginhawa
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
       TZ_NAME: ${TZ_NAME:-Asia/Manila}
+      DEV_EMAILS: ${DEV_EMAILS:-}
     depends_on:
       db:
         condition: service_healthy

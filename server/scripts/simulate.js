@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Simulates one or more Ginhawa sensor nodes so the app can be demoed without hardware.
+// Simulates one or more Ginhawa stations (sensor nodes) so the app can be demoed without hardware.
 //
 //   node scripts/simulate.js                    # stream live readings every 5 s
 //   node scripts/simulate.js --backfill 48      # first upload 48 h of history, then stream
-//   node scripts/simulate.js --devices 3        # simulate 3 locations
+//   node scripts/simulate.js --devices 3        # simulate 3 stations
 //
 // Environment: API_URL (default http://localhost:4000), SIM_EMAIL, SIM_PASSWORD,
 // SIM_INTERVAL_SECONDS. The demo account is created if it does not exist.
@@ -21,11 +21,13 @@ const argValue = (name, fallback) => {
 const BACKFILL_HOURS = argValue('--backfill', Number(process.env.SIM_BACKFILL_HOURS ?? 0));
 const DEVICE_COUNT = argValue('--devices', Number(process.env.SIM_DEVICES ?? 2));
 
+// Placeholder stations: clearly not real places. Replace with your own via the app.
+// `traffic` only scales how busy each simulated spot is.
 const SITES = [
-  { name: 'Sim · MRT Station Entrance', location: 'EDSA, Quezon City', latitude: 14.6195, longitude: 121.0512, traffic: 1.2 },
-  { name: 'Sim · Campus Canteen', location: 'Main Building, Ground Floor', latitude: 14.5995, longitude: 120.9842, traffic: 0.8 },
-  { name: 'Sim · Mall Atrium', location: 'Level 1 Atrium', latitude: 14.5866, longitude: 121.0566, traffic: 0.6 },
-  { name: 'Sim · Jeepney Terminal', location: 'Terminal Bay 3', latitude: 14.6507, longitude: 121.0487, traffic: 1.5 },
+  { name: 'Station 1 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.2 },
+  { name: 'Station 2 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.8 },
+  { name: 'Station 3 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.6 },
+  { name: 'Station 4 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.5 },
 ];
 
 async function api(path, { token, deviceKey, body, method = body ? 'POST' : 'GET' } = {}) {
@@ -90,8 +92,8 @@ async function setupDevice(token, site, existing) {
   if (device) {
     ({ apiKey } = await api(`/devices/${device.id}/rotate-key`, { token, method: 'POST' }));
   } else {
-    const { name, location, latitude, longitude } = site;
-    ({ device, apiKey } = await api('/devices', { token, body: { name, location, latitude, longitude } }));
+    const { name, landmark } = site;
+    ({ device, apiKey } = await api('/devices', { token, body: { name, landmark } }));
   }
   return { device, apiKey, generate: makeGenerator(site) };
 }
@@ -100,6 +102,10 @@ async function main() {
   console.log(`Simulator -> ${API_URL} as ${EMAIL}`);
   const token = await getToken();
   const { devices } = await api('/devices', { token });
+  const { user } = await api('/auth/me', { token });
+  if (user.role !== 'dev') {
+    throw new Error(`${EMAIL} is not a developer, so it cannot add stations. Add it to DEV_EMAILS and restart the server.`);
+  }
   const sims = [];
   for (const site of SITES.slice(0, DEVICE_COUNT)) sims.push(await setupDevice(token, site, devices));
 

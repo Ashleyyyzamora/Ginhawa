@@ -12,6 +12,11 @@ const PATHS = {
   check: 'M5 12l5 5 9-10',
   alert: 'M12 3l10 18H2zM12 10v5M12 18v.01',
   chip: 'M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4',
+  close: 'M6 6l12 12M18 6L6 18',
+  search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-5-5',
+  info: 'M12 22a10 10 0 100-20 10 10 0 000 20zM12 16v-5M12 8v.01',
+  refresh: 'M20 11a8 8 0 10-2.3 5.7M20 4v7h-7',
+  wifi: 'M2 9a15 15 0 0120 0M5 12.5a10 10 0 0114 0M8.5 16a5 5 0 017 0M12 20v.01',
 };
 
 export default function Icon({ name, size = 22, ...props }) {

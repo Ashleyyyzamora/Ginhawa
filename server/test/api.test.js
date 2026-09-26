@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 
 const dbUrl = process.env.TEST_DATABASE_URL;
+// Developers can manage stations; everyone else is a viewer.
+process.env.DEV_EMAILS = 'student@example.com, Batch@Example.com, dev2@example.com';
 const opts = { skip: dbUrl ? false : 'set TEST_DATABASE_URL to run API tests' };
 
 let base, wsUrl, instance, pool;
@@ -64,6 +66,7 @@ test('full flow: register, add device, ingest, live updates, alerts, history', o
     body: { email: 'Student@Example.com', name: 'Student', password: 'password123' },
   });
   assert.equal(reg.status, 201);
+  assert.equal(reg.body.user.role, 'dev');
   const token = reg.body.token;
 
   const dup = await api('/auth/register', {
@@ -77,11 +80,25 @@ test('full flow: register, add device, ingest, live updates, alerts, history', o
   const badLogin = await api('/auth/login', { method: 'POST', body: { email: 'student@example.com', password: 'nope' } });
   assert.equal(badLogin.status, 401);
 
-  const created = await api('/devices', { method: 'POST', token, body: { name: 'MRT Gate 1', location: 'Cubao' } });
+  const created = await api('/devices', {
+    method: 'POST',
+    token,
+    body: { name: 'Barangay Test', landmark: 'Near the market' },
+  });
   assert.equal(created.status, 201);
   const { device, apiKey } = created.body;
   assert.match(apiKey, /^gnh_/);
   assert.equal(device.api_key_hash, undefined);
+  assert.equal(device.landmark, 'Near the market');
+  assert.equal(device.created_by, 'Student');
+  assert.equal(device.can_manage, true);
+
+  // Same name + landmark is a duplicate station (case-insensitive); another landmark is fine.
+  const dupStation = await api('/devices', { method: 'POST', token, body: { name: 'barangay test', landmark: 'near the MARKET' } });
+  assert.equal(dupStation.status, 409);
+  const second = await api('/devices', { method: 'POST', token, body: { name: 'Barangay Test', landmark: 'Plaza' } });
+  assert.equal(second.status, 201);
+  assert.equal((await api(`/devices/${second.body.device.id}`, { method: 'DELETE', token })).status, 204);
 
   // Live channel
   const ws = new WebSocket(wsUrl);
@@ -155,9 +172,30 @@ test('full flow: register, add device, ingest, live updates, alerts, history', o
   const patched = await api(`/devices/${device.id}`, { method: 'PATCH', token, body: { pm25_threshold: 50 } });
   assert.equal(patched.body.device.pm25_threshold, 50);
 
-  // Other users can't see the device.
+  // Stations are shared: viewers can see them and their data, but not add or change them.
   const other = await api('/auth/register', { method: 'POST', body: { email: 'o@x.com', name: 'O', password: 'password123' } });
-  assert.equal((await api(`/devices/${device.id}`, { token: other.body.token })).status, 404);
+  assert.equal(other.body.user.role, 'viewer');
+  const otherToken = other.body.token;
+  assert.equal((await api('/devices', { method: 'POST', token: otherToken, body: { name: 'Nope' } })).status, 403);
+  const seen = await api(`/devices/${device.id}`, { token: otherToken });
+  assert.equal(seen.status, 200);
+  assert.equal(seen.body.device.can_manage, false);
+  assert.equal((await api('/devices', { token: otherToken })).body.devices.length, 1);
+  assert.equal((await api(`/devices/${device.id}/readings?bucket=raw`, { token: otherToken })).body.points.length, 4);
+  assert.equal((await api('/alerts', { token: otherToken })).body.alerts.length, 1);
+  assert.equal((await api(`/devices/${device.id}`, { method: 'PATCH', token: otherToken, body: { name: 'x' } })).status, 403);
+  assert.equal((await api(`/devices/${device.id}/rotate-key`, { method: 'POST', token: otherToken })).status, 403);
+  assert.equal((await api(`/devices/${device.id}`, { method: 'DELETE', token: otherToken })).status, 403);
+  // Viewers may acknowledge alerts.
+  const [firstAlert] = (await api('/alerts', { token: otherToken })).body.alerts;
+  assert.equal((await api(`/alerts/${firstAlert.id}/ack`, { method: 'POST', token: otherToken })).status, 200);
+
+  // Any developer can manage any station, not just the one who added it.
+  const dev2 = await api('/auth/register', { method: 'POST', body: { email: 'dev2@example.com', name: 'Dev Two', password: 'password123' } });
+  const dev2Station = await api(`/devices/${device.id}`, { token: dev2.body.token });
+  assert.equal(dev2Station.body.device.can_manage, true);
+  const renamed = await api(`/devices/${device.id}`, { method: 'PATCH', token: dev2.body.token, body: { landmark: 'Plaza' } });
+  assert.equal(renamed.body.device.landmark, 'Plaza');
 
   // Rotating the key invalidates the old one.
   const rotated = await api(`/devices/${device.id}/rotate-key`, { method: 'POST', token });
@@ -182,7 +220,7 @@ test('buffered batch opens and resolves alerts at the readings\' own times', opt
     deviceKey: created.apiKey,
     body: { readings: [at(3, 10), at(0, 5), at(1, 50), at(2, 80), at(4, 60)] },
   });
-  const { body } = await api('/alerts', { token: session.token });
+  const { body } = await api(`/alerts?device_id=${created.device.id}`, { token: session.token });
   const alerts = body.alerts.sort((a, b) => a.id - b.id);
   assert.equal(alerts.length, 2);
   assert.equal(new Date(alerts[0].started_at).getTime(), t0 + 60000);

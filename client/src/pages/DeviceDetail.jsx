@@ -7,6 +7,8 @@ import { AqiDisc, LevelTag } from '../components/Aqi.jsx';
 import MetricTile from '../components/MetricTile.jsx';
 import { HistoryChart, HourlyChart } from '../components/Charts.jsx';
 import Icon from '../components/Icon.jsx';
+import AqiScale from '../components/AqiScale.jsx';
+import { useUi } from '../components/ui.jsx';
 import { METRICS, duration, fmtDateTime, isOnline, levelInfo, timeAgo } from '../format.js';
 
 const RANGES = [
@@ -27,8 +29,10 @@ const VIEWS = [
 export default function DeviceDetail() {
   const { id } = useParams();
   const { devices, subscribe } = useLive();
+  const { toast } = useUi();
   const device = devices?.find((d) => d.id === id);
   const now = useNow();
+  const [reloadKey, setReloadKey] = useState(0); // bumped by pull-to-refresh
 
   const [range, setRange] = useState(RANGES[1]);
   const [view, setView] = useState(VIEWS[0]);
@@ -40,17 +44,18 @@ export default function DeviceDetail() {
     setPoints(null);
     const from = new Date(Date.now() - range.ms).toISOString();
     api.readings(id, { from, bucket: range.bucket }).then((r) => setPoints(r.points)).catch(() => setPoints([]));
-  }, [id, range]);
+  }, [id, range, reloadKey]);
 
   useEffect(() => {
     api.hourlyProfile(id, 7).then((r) => setProfile(r.hours)).catch(() => setProfile([]));
     api.alerts({ device_id: id, limit: 5 }).then((r) => setAlerts(r.alerts)).catch(() => {});
-  }, [id]);
+  }, [id, reloadKey]);
 
   // Live: append new readings to the 1-hour chart and keep the alert list fresh.
   useEffect(
     () =>
       subscribe((msg) => {
+        if (msg.type === 'refresh') setReloadKey((k) => k + 1);
         if (msg.type === 'reading' && msg.deviceId === id && range.key === '1h') {
           setPoints((p) => (p ? [...p, { ...msg.reading, t: msg.reading.recorded_at }] : p));
         }
@@ -63,10 +68,24 @@ export default function DeviceDetail() {
 
   const spanMs = useMemo(() => range.ms, [range]);
 
+  const exportCsv = async () => {
+    try {
+      const from = new Date(Date.now() - 30 * 86400e3).toISOString();
+      const res = await api.exportCsv(id, { from });
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement('a'), { href: url, download: `${device.name}_readings.csv` });
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('CSV downloaded');
+    } catch (err) {
+      toast(err.message, { tone: 'danger' });
+    }
+  };
+
   if (devices && !device) {
     return (
       <>
-        <PageHeader title="Device not found" back="/" />
+        <PageHeader title="Station not found" back="/" />
         <p className="muted">It may have been deleted.</p>
       </>
     );
@@ -81,24 +100,32 @@ export default function DeviceDetail() {
     <>
       <PageHeader
         title={device.name}
-        subtitle={device.location}
+        subtitle={device.landmark}
         back="/"
         action={
-          <Link to={`/devices/${id}/settings`} className="icon-btn" aria-label="Device settings">
-            <Icon name="gear" />
-          </Link>
+          device.can_manage && (
+            <Link to={`/devices/${id}/settings`} className="icon-btn" aria-label="Station settings">
+              <Icon name="gear" />
+            </Link>
+          )
         }
       />
 
-      <section className={`card hero lvl-bg-${r?.level ?? 'none'}`}>
-        <AqiDisc reading={r} size="lg" />
-        <div>
-          <LevelTag level={r?.level} />
-          <p className="hero-advice">{info.advice}</p>
-          <p className="muted small">
-            <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Online' : 'Offline'} · updated {timeAgo(device.last_seen_at, now)}
-          </p>
+      <section className={`card hero-card lvl-${r?.level ?? 'none'}`}>
+        <div className="hero">
+          <AqiDisc reading={r} size="lg" />
+          <div>
+            <LevelTag level={r?.level} />
+            <p className="hero-advice">{info.advice}</p>
+            <p className="muted small">
+              <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Online' : 'Offline'} · updated {timeAgo(device.last_seen_at, now)}
+            </p>
+          </div>
         </div>
+        <AqiScale aqi={r?.aqi} />
+        <p className="muted small">
+          The overall level is the worst of PM2.5, VOC and NOx. Tap any reading below to learn what it means.
+        </p>
       </section>
 
       <section className="tile-grid" aria-label="Latest readings">
@@ -161,7 +188,7 @@ export default function DeviceDetail() {
           <Link to="/alerts" className="link small">See all</Link>
         </div>
         {alerts.length === 0 ? (
-          <p className="muted small">No alerts for this device.</p>
+          <p className="muted small">No alerts for this station.</p>
         ) : (
           <ul className="plain-list">
             {alerts.map((a) => (
@@ -177,6 +204,11 @@ export default function DeviceDetail() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="card station-footer">
+        <p className="muted small">Added by {device.created_by}</p>
+        <button className="btn" onClick={exportCsv}><Icon name="download" size={18} /> Download last 30 days (CSV)</button>
       </section>
     </>
   );

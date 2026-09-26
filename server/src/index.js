@@ -13,8 +13,8 @@ export async function start({ port = config.port } = {}) {
 
   // `realtime` needs the HTTP server and the app needs `realtime`, so hand the app a
   // forwarding object and fill it in once the server exists.
-  const hub = { publishToUser: () => {}, close: () => {} };
-  const app = createApp({ publishToUser: (...a) => hub.publishToUser(...a) });
+  const hub = { broadcast: () => {}, close: () => {} };
+  const app = createApp({ broadcast: (...a) => hub.broadcast(...a) });
 
   const server =
     config.tlsKeyFile && config.tlsCertFile

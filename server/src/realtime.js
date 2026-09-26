@@ -12,13 +12,14 @@ const HEARTBEAT_MS = 30000;
  *   server -> client  { "type": "ready", "user": {...} }
  *   server -> client  { "type": "reading", "deviceId", "reading" }
  *   server -> client  { "type": "alert" | "alert_resolved", "alert" }
- *   server -> client  { "type": "device_updated" | "device_deleted", ... }
+ *   server -> client  { "type": "device_created" | "device_deleted", "deviceId" }
+ *   server -> client  { "type": "device_updated", "device" }
  *
- * Users only ever receive events for devices they own.
+ * Stations are shared, so every signed-in user receives every event.
  */
 export function createRealtime(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
-  const socketsByUser = new Map();
+  const authed = new Set();
 
   const send = (ws, msg) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
@@ -43,18 +44,13 @@ export function createRealtime(server) {
         return ws.close(4401, 'unauthorized');
       }
       clearTimeout(authTimer);
-      if (!socketsByUser.has(ws.user.id)) socketsByUser.set(ws.user.id, new Set());
-      socketsByUser.get(ws.user.id).add(ws);
+      authed.add(ws);
       send(ws, { type: 'ready', user: ws.user });
     });
 
     ws.on('close', () => {
       clearTimeout(authTimer);
-      const set = ws.user && socketsByUser.get(ws.user.id);
-      if (set) {
-        set.delete(ws);
-        if (set.size === 0) socketsByUser.delete(ws.user.id);
-      }
+      authed.delete(ws);
     });
   });
 
@@ -70,8 +66,8 @@ export function createRealtime(server) {
   }, HEARTBEAT_MS);
 
   return {
-    publishToUser(userId, msg) {
-      for (const ws of socketsByUser.get(userId) ?? []) send(ws, msg);
+    broadcast(msg) {
+      for (const ws of authed) send(ws, msg);
     },
     close() {
       clearInterval(heartbeat);
@@ -82,4 +78,4 @@ export function createRealtime(server) {
 }
 
 /** No-op publisher, handy for scripts and tests that don't need live updates. */
-export const nullRealtime = { publishToUser() {}, close() {} };
+export const nullRealtime = { broadcast() {}, close() {} };

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { METRICS, fmtMetric, levelInfo } from '../format.js';
+import { GAUGE_MAX, METRICS, fmtMetric, levelInfo } from '../format.js';
 import { Sheet } from './ui.jsx';
 import Icon from './Icon.jsx';
 
@@ -8,6 +8,7 @@ export default function MetricTile({ metric, value, emphasis }) {
   const [open, setOpen] = useState(false);
   const m = METRICS[metric];
   const level = m.level?.(value);
+  const pos = value == null ? null : Math.min(1, Math.max(0, value / GAUGE_MAX[metric]));
   return (
     <>
       <button type="button" className={`tile ${emphasis ? 'tile-emphasis' : ''}`} onClick={() => setOpen(true)} aria-label={`${m.label}: ${fmtMetric(metric, value)} ${m.unit}. What does this mean?`}>
@@ -19,12 +20,13 @@ export default function MetricTile({ metric, value, emphasis }) {
           {fmtMetric(metric, value)}
           {m.unit && <span className="tile-unit">{m.unit}</span>}
         </div>
-        {m.level && value != null && (
-          <div className={`tile-level lvl-${level}`}>
-            <span className="swatch" aria-hidden="true" />
-            {levelInfo(level).short ?? levelInfo(level).label}
-          </div>
-        )}
+        <div className="tile-level">
+          {m.level && value != null ? (levelInfo(level).short ?? levelInfo(level).label) : m.unit ? '\u00a0' : ''}
+        </div>
+        {/* small gauge: coloured by level for pollutants, neutral for weather values */}
+        <div className={`gauge ${m.level ? 'gauge-aqi' : ''}`} aria-hidden="true">
+          {pos != null && <span className={`gauge-dot ${m.level ? `lvl-${level}` : ''}`} style={{ left: `${pos * 100}%` }} />}
+        </div>
       </button>
       {open && (
         <Sheet title={m.label} onClose={() => setOpen(false)}>

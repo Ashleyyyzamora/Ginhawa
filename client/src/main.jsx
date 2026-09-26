@@ -5,6 +5,9 @@ import { AuthProvider } from './auth.jsx';
 import { UiProvider } from './components/ui.jsx';
 import App from './App.jsx';
 import './styles.css';
+import { applyTheme } from './theme.js';
+
+applyTheme();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

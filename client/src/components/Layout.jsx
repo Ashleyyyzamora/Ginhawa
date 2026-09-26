@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { useLive } from '../live.jsx';
 import Icon from './Icon.jsx';
+import { useTheme } from '../theme.js';
 
 const PULL_TRIGGER = 64;
 
@@ -68,20 +69,51 @@ export default function Layout() {
   );
 }
 
+/**
+ * Apple-style large title: the big title scrolls away and a compact bar with the
+ * same title (plus back / action buttons) stays pinned at the top.
+ */
 export function PageHeader({ title, subtitle, back, action }) {
+  const titleRef = useRef(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver(([entry]) => setCompact(!entry.isIntersecting), {
+      rootMargin: '-56px 0px 0px 0px',
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
   return (
-    <header className="page-header">
-      {back && (
-        <NavLink to={back} className="icon-btn" aria-label="Back">
-          <Icon name="back" />
-        </NavLink>
-      )}
-      <div className="page-title">
+    <>
+      <div className={`navbar ${compact ? 'navbar-compact' : ''}`}>
+        <div className="navbar-side">
+          {back && (
+            <NavLink to={back} className="nav-btn" aria-label="Back">
+              <Icon name="back" />
+            </NavLink>
+          )}
+        </div>
+        <div className="navbar-title" aria-hidden={!compact}>{title}</div>
+        <div className="navbar-side navbar-actions">{action}</div>
+      </div>
+      <header className="large-title" ref={titleRef}>
         <h1>{title}</h1>
         {subtitle && <p className="muted">{subtitle}</p>}
-      </div>
-      {action}
-    </header>
+      </header>
+    </>
+  );
+}
+
+/** Quick light/dark switch. Picks the opposite of what is shown now (the Account page also offers "System"). */
+export function ThemeToggle() {
+  const { theme, setPref } = useTheme();
+  const next = theme === 'dark' ? 'light' : 'dark';
+  return (
+    <button className="nav-btn" onClick={() => setPref(next)} aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}>
+      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={20} />
+    </button>
   );
 }
 

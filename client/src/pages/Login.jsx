@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../auth.jsx';
+import { ThemeToggle } from '../components/Layout.jsx';
 
 export default function Login() {
   const { login, register } = useAuth();
@@ -25,6 +26,7 @@ export default function Login() {
 
   return (
     <div className="auth-page">
+      <div className="auth-theme"><ThemeToggle /></div>
       <div className="auth-brand">
         <img src="/icon.svg" alt="" width="64" height="64" />
         <h1>Ginhawa</h1>

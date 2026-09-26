@@ -2,8 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { useLive, useNow } from '../live.jsx';
-import { ConnectionPill, PageHeader } from '../components/Layout.jsx';
-import { AqiDisc, LevelTag } from '../components/Aqi.jsx';
+import { ConnectionPill, PageHeader, ThemeToggle } from '../components/Layout.jsx';
 import Icon from '../components/Icon.jsx';
 import { fmtMetric, isOnline, levelInfo, timeAgo } from '../format.js';
 
@@ -91,7 +90,16 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeader title={`Hi, ${user.name.split(' ')[0]}`} subtitle="Air quality across all stations" action={<ConnectionPill />} />
+      <PageHeader
+        title="Stations"
+        subtitle={`Hi ${user.name.split(' ')[0]}, here's the air right now`}
+        action={
+          <>
+            <ConnectionPill />
+            <ThemeToggle />
+          </>
+        }
+      />
       {error && <p className="error">{error}</p>}
 
       {devices == null ? (
@@ -149,31 +157,40 @@ export default function Dashboard() {
             <ul className="device-list">
               {visible.map((d) => {
                 const online = isOnline(d, now);
+                const level = d.latest?.level;
+                const info = levelInfo(level);
                 return (
                   <li key={d.id}>
-                    <Link to={`/devices/${d.id}`} className={`card device-card accent lvl-${d.latest?.level ?? 'none'}`}>
-                      <AqiDisc reading={d.latest} />
-                      <div className="device-main">
-                        <div className="device-name">
-                          <span className="truncate">{d.name}</span>
-                          {d.open_alerts > 0 && (
-                            <span className="alert-chip" aria-label={`${d.open_alerts} active alerts`}>
-                              <Icon name="alert" size={14} /> {d.open_alerts}
-                            </span>
-                          )}
+                    <Link to={`/devices/${d.id}`} className={`station-card lvl-${level ?? 'none'}`}>
+                      <div className="station-card-top">
+                        <div className="station-card-main">
+                          <div className="station-card-name">
+                            <span className="truncate">{d.name}</span>
+                            {d.open_alerts > 0 && (
+                              <span className="alert-chip" aria-label={`${d.open_alerts} active alerts`}>
+                                <Icon name="alert" size={13} /> {d.open_alerts}
+                              </span>
+                            )}
+                          </div>
+                          {d.landmark && <div className="station-card-sub truncate">{d.landmark}</div>}
+                          <div className="station-card-status">
+                            <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Live' : 'Offline'} · {timeAgo(d.last_seen_at, now)}
+                          </div>
                         </div>
-                        {d.landmark && <div className="muted small truncate"><Icon name="pin" size={13} /> {d.landmark}</div>}
-                        <LevelTag level={d.latest?.level} short />
-                        <dl className="mini-metrics">
-                          <div><dt>PM2.5</dt><dd>{fmtMetric('pm25', d.latest?.pm25)}</dd></div>
-                          <div><dt>VOC</dt><dd>{fmtMetric('voc_index', d.latest?.voc_index)}</dd></div>
-                          <div><dt>NOx</dt><dd>{fmtMetric('nox_index', d.latest?.nox_index)}</dd></div>
-                        </dl>
-                        <div className="muted small">
-                          <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Online' : 'Offline'} · {timeAgo(d.last_seen_at, now)}
+                        <div className="station-card-aqi">
+                          <span className="station-card-num">{d.latest?.aqi ?? '—'}</span>
+                          <span className="station-card-unit">AQI</span>
                         </div>
                       </div>
-                      <Icon name="back" size={18} className="chevron" />
+                      <div className="station-card-bottom">
+                        <span className="level-pill">
+                          <span className="swatch" aria-hidden="true" /> {info.short ?? info.label}
+                        </span>
+                        <span className="station-card-metrics">
+                          PM2.5 <b>{fmtMetric('pm25', d.latest?.pm25)}</b> · VOC <b>{fmtMetric('voc_index', d.latest?.voc_index)}</b> · NOx{' '}
+                          <b>{fmtMetric('nox_index', d.latest?.nox_index)}</b>
+                        </span>
+                      </div>
                     </Link>
                   </li>
                 );

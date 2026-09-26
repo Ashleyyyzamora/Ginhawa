@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { fmt } from '../format.js';
+import { useTheme } from '../theme.js';
 
 const TOKENS = ['--series-1', '--series-2', '--grid', '--axis', '--text-secondary', '--threshold', '--surface'];
 
@@ -14,12 +15,9 @@ function useChartColors() {
     return Object.fromEntries(TOKENS.map((t) => [t.slice(2), css.getPropertyValue(t).trim()]));
   };
   const [colors, setColors] = useState(read);
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const update = () => setColors(read());
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
-  }, []);
+  const { theme } = useTheme();
+  // Re-read the tokens whenever the theme shown changes (system or manual toggle).
+  useEffect(() => setColors(read()), [theme]);
   return colors;
 }
 

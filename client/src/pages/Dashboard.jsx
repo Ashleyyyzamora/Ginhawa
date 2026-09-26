@@ -13,16 +13,19 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeader title={`Hi, ${user.name.split(' ')[0]}`} subtitle="Air quality at your monitored sites" action={<ConnectionPill />} />
+      <PageHeader title={`Hi, ${user.name.split(' ')[0]}`} subtitle="Air quality at every monitoring station" action={<ConnectionPill />} />
       {error && <p className="error">{error}</p>}
       {devices == null ? (
         <div className="skeleton-list">{[0, 1].map((i) => <div key={i} className="card skeleton" />)}</div>
       ) : devices.length === 0 ? (
         <div className="card empty">
           <Icon name="chip" size={40} />
-          <h2>No devices yet</h2>
-          <p className="muted">Register your sensor node to get its API key, or run the simulator to try the app with sample data.</p>
-          <Link to="/devices/new" className="btn btn-primary">Add a device</Link>
+          <h2>No stations yet</h2>
+          <p className="muted">
+            Add a station where you placed a sensor (for example, a barangay) to get its device key, or run the simulator
+            to try the app with placeholder data.
+          </p>
+          <Link to="/devices/new" className="btn btn-primary">Add a station</Link>
         </div>
       ) : (
         <ul className="device-list">
@@ -39,7 +42,7 @@ export default function Dashboard() {
                         <span className="alert-chip"><Icon name="alert" size={14} /> {d.open_alerts}</span>
                       )}
                     </div>
-                    {d.location && <div className="muted small"><Icon name="pin" size={13} /> {d.location}</div>}
+                    {d.landmark && <div className="muted small"><Icon name="pin" size={13} /> {d.landmark}</div>}
                     <LevelTag level={d.latest?.level} short />
                     <dl className="mini-metrics">
                       <div><dt>PM2.5</dt><dd>{fmtMetric('pm25', d.latest?.pm25)}</dd></div>

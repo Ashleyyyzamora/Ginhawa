@@ -9,7 +9,7 @@
 //   Deployed with a domain:  "https://ginhawa.example.com"
 #define API_BASE_URL   "https://192.168.1.20"
 
-// Key shown once in the app when you add the device (Add device -> copy key).
+// Key shown once in the app when you add this sensor's station (Add station -> copy key).
 #define DEVICE_KEY     "gnh_paste_your_key_here"
 
 // Leave empty ("") to skip certificate checks, fine for a LAN demo with Caddy's self-signed

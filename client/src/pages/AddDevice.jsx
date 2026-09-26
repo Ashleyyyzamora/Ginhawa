@@ -5,32 +5,21 @@ import { useLive } from '../live.jsx';
 import { PageHeader } from '../components/Layout.jsx';
 import KeyReveal from '../components/KeyReveal.jsx';
 
+// Adding a station registers the sensor placed there (one device = one station).
 export default function AddDevice() {
   const { refresh } = useLive();
-  const [form, setForm] = useState({ name: '', location: '', latitude: '', longitude: '' });
+  const [form, setForm] = useState({ name: '', landmark: '' });
   const [created, setCreated] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-
-  const useMyLocation = () =>
-    navigator.geolocation?.getCurrentPosition(
-      (pos) => setForm((f) => ({ ...f, latitude: pos.coords.latitude.toFixed(6), longitude: pos.coords.longitude.toFixed(6) })),
-      () => setError('Could not read your location'),
-    );
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const body = {
-        name: form.name,
-        location: form.location || null,
-        latitude: form.latitude === '' ? null : Number(form.latitude),
-        longitude: form.longitude === '' ? null : Number(form.longitude),
-      };
-      setCreated(await api.createDevice(body));
+      setCreated(await api.createDevice({ name: form.name, landmark: form.landmark || null }));
       refresh();
     } catch (err) {
       setError(err.message);
@@ -42,10 +31,10 @@ export default function AddDevice() {
   if (created) {
     return (
       <>
-        <PageHeader title="Device added" subtitle={created.device.name} />
+        <PageHeader title="Station added" subtitle={[created.device.name, created.device.landmark].filter(Boolean).join(' · ')} />
         <div className="card">
           <KeyReveal apiKey={created.apiKey} />
-          <Link to={`/devices/${created.device.id}`} className="btn btn-primary">Open device</Link>
+          <Link to={`/devices/${created.device.id}`} className="btn btn-primary">Open station</Link>
         </div>
       </>
     );
@@ -53,29 +42,21 @@ export default function AddDevice() {
 
   return (
     <>
-      <PageHeader title="Add a device" subtitle="Register a sensor node to get its API key" />
+      <PageHeader title="Add a station" subtitle="Where the sensor is placed. Everyone signed in will see it." />
       <form className="card form" onSubmit={submit}>
         <label>
-          Name
-          <input value={form.name} onChange={set('name')} placeholder="e.g. Library entrance" required maxLength={100} />
+          Station / location
+          <input value={form.name} onChange={set('name')} placeholder="e.g. Barangay Carmen" required maxLength={100} />
         </label>
         <label>
-          Location <span className="muted">(optional)</span>
-          <input value={form.location} onChange={set('location')} placeholder="Building / floor / landmark" maxLength={200} />
+          <span>Landmark / spot <span className="muted">(optional)</span></span>
+          <input value={form.landmark} onChange={set('landmark')} placeholder="e.g. Near the public market entrance" maxLength={200} />
         </label>
-        <div className="form-row">
-          <label>
-            Latitude
-            <input inputMode="decimal" value={form.latitude} onChange={set('latitude')} />
-          </label>
-          <label>
-            Longitude
-            <input inputMode="decimal" value={form.longitude} onChange={set('longitude')} />
-          </label>
-        </div>
-        <button type="button" className="btn" onClick={useMyLocation}>Use my current location</button>
+        <p className="muted small">
+          Use a landmark to tell apart two sensors in the same place. You'll get a key to put in the sensor's firmware.
+        </p>
         {error && <p className="error" role="alert">{error}</p>}
-        <button className="btn btn-primary" disabled={busy}>{busy ? 'Adding…' : 'Add device'}</button>
+        <button className="btn btn-primary" disabled={busy}>{busy ? 'Adding…' : 'Add station'}</button>
       </form>
     </>
   );

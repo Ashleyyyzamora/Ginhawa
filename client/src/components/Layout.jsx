@@ -8,7 +8,7 @@ export default function Layout() {
   const tabs = [
     { to: '/', icon: 'home', label: 'Home', end: true },
     { to: '/alerts', icon: 'bell', label: 'Alerts', badge: openAlerts },
-    { to: '/devices/new', icon: 'plus', label: 'Add device' },
+    { to: '/devices/new', icon: 'plus', label: 'Add station' },
     { to: '/account', icon: 'user', label: 'Account' },
   ];
   return (

@@ -25,7 +25,7 @@ export default function Alerts() {
 
   return (
     <>
-      <PageHeader title="Alerts" subtitle="When pollution crosses a device's thresholds" />
+      <PageHeader title="Alerts" subtitle="When pollution at a station crosses its thresholds" />
       <div className="segmented" role="tablist">
         <button role="tab" aria-selected={status === 'open'} onClick={() => setStatus('open')}>Ongoing</button>
         <button role="tab" aria-selected={status === 'all'} onClick={() => setStatus('all')}>History</button>
@@ -36,7 +36,7 @@ export default function Alerts() {
       ) : alerts.length === 0 ? (
         <div className="card empty">
           <h2>{status === 'open' ? 'All clear' : 'No alerts yet'}</h2>
-          <p className="muted">{status === 'open' ? 'No device is above its thresholds right now.' : 'Alerts will appear here.'}</p>
+          <p className="muted">{status === 'open' ? 'No station is above its thresholds right now.' : 'Alerts will appear here.'}</p>
         </div>
       ) : (
         <ul className="plain-list alert-list">

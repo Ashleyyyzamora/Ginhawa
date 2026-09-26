@@ -9,11 +9,11 @@ import { METRICS, withSummary } from '../readings.js';
 const BUCKETS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '6h': 21600, '1d': 86400 };
 const MAX_POINTS = 500;
 
+// Each device is a station: `name` is where it is placed (e.g. "Barangay Carmen"),
+// `landmark` is the exact spot (e.g. "near the public market entrance").
 const deviceFields = {
   name: z.string().trim().min(1).max(100),
-  location: z.string().trim().max(200).nullish(),
-  latitude: z.number().min(-90).max(90).nullish(),
-  longitude: z.number().min(-180).max(180).nullish(),
+  landmark: z.string().trim().max(200).nullish(),
 };
 const createSchema = z.object(deviceFields);
 const updateSchema = z
@@ -32,7 +32,7 @@ const rangeSchema = z.object({
 });
 
 /** Public shape of a device (never includes the key hash). */
-function serializeDevice(row) {
+function serializeDevice(row, user) {
   const { api_key_hash, owner_id, latest, open_alerts, ...device } = row;
   const lastSeen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0;
   return {
@@ -40,6 +40,8 @@ function serializeDevice(row) {
     online: Date.now() - lastSeen < config.offlineAfterSeconds * 1000,
     latest: withSummary(latest ?? null),
     open_alerts: open_alerts ?? 0,
+    // Stations are visible to everyone; only the user who added one may change it.
+    can_manage: owner_id === user.id,
   };
 }
 
@@ -47,15 +49,30 @@ const DEVICE_SELECT = `
   SELECT d.*,
     (SELECT to_jsonb(r) FROM readings r WHERE r.device_id = d.id
       ORDER BY r.recorded_at DESC LIMIT 1) AS latest,
-    (SELECT count(*)::int FROM alerts a WHERE a.device_id = d.id AND a.resolved_at IS NULL) AS open_alerts
-  FROM devices d`;
+    (SELECT count(*)::int FROM alerts a WHERE a.device_id = d.id AND a.resolved_at IS NULL) AS open_alerts,
+    u.name AS created_by
+  FROM devices d JOIN users u ON u.id = d.owner_id`;
 
-async function loadOwnedDevice(req) {
+async function loadDevice(req) {
   const { id } = req.params;
-  if (!isUuid(id)) throw new HttpError(404, 'Device not found');
-  const { rows } = await query(`${DEVICE_SELECT} WHERE d.id = $1 AND d.owner_id = $2`, [id, req.user.id]);
-  if (!rows[0]) throw new HttpError(404, 'Device not found');
+  if (!isUuid(id)) throw new HttpError(404, 'Station not found');
+  const { rows } = await query(`${DEVICE_SELECT} WHERE d.id = $1`, [id]);
+  if (!rows[0]) throw new HttpError(404, 'Station not found');
   return rows[0];
+}
+
+async function loadManagedDevice(req) {
+  const device = await loadDevice(req);
+  if (device.owner_id !== req.user.id) throw new HttpError(403, 'Only the person who added this station can change it');
+  return device;
+}
+
+// The unique index on (name, landmark) turns duplicate stations into a clear message.
+function duplicateStation(err) {
+  if (err.code === '23505' && err.constraint === 'devices_station_unique_idx') {
+    return new HttpError(409, 'A station with that name and landmark already exists');
+  }
+  return err;
 }
 
 function resolveRange(q) {
@@ -79,48 +96,59 @@ export default function devicesRouter(realtime) {
   router.use(requireUser);
 
   router.get('/', async (req, res) => {
-    const { rows } = await query(`${DEVICE_SELECT} WHERE d.owner_id = $1 ORDER BY d.created_at`, [req.user.id]);
-    res.json({ devices: rows.map(serializeDevice) });
+    const { rows } = await query(`${DEVICE_SELECT} ORDER BY lower(d.name), lower(coalesce(d.landmark, ''))`);
+    res.json({ devices: rows.map((r) => serializeDevice(r, req.user)) });
   });
 
   router.post('/', async (req, res) => {
     const body = createSchema.parse(req.body);
     const apiKey = generateDeviceKey();
     const { rows } = await query(
-      `INSERT INTO devices (owner_id, name, location, latitude, longitude, api_key_hash)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [req.user.id, body.name, body.location ?? null, body.latitude ?? null, body.longitude ?? null, hashDeviceKey(apiKey)],
-    );
+      `INSERT INTO devices (owner_id, name, landmark, api_key_hash) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [req.user.id, body.name, body.landmark || null, hashDeviceKey(apiKey)],
+    ).catch((err) => {
+      throw duplicateStation(err);
+    });
+    req.params.id = rows[0].id;
+    const device = serializeDevice(await loadDevice(req), req.user);
+    realtime.broadcast({ type: 'device_created', deviceId: device.id });
     // The plain key is only ever returned here (and on rotate).
-    res.status(201).json({ device: serializeDevice(rows[0]), apiKey });
+    res.status(201).json({ device, apiKey });
   });
 
   router.get('/:id', async (req, res) => {
-    res.json({ device: serializeDevice(await loadOwnedDevice(req)) });
+    res.json({ device: serializeDevice(await loadDevice(req), req.user) });
   });
 
   router.patch('/:id', async (req, res) => {
-    const device = await loadOwnedDevice(req);
+    const device = await loadManagedDevice(req);
     const body = updateSchema.parse(req.body);
+    if (body.landmark === '') body.landmark = null;
     const keys = Object.keys(body);
     if (keys.length) {
       const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-      await query(`UPDATE devices SET ${sets} WHERE id = $1`, [device.id, ...keys.map((k) => body[k] ?? null)]);
+      await query(`UPDATE devices SET ${sets} WHERE id = $1`, [device.id, ...keys.map((k) => body[k] ?? null)]).catch(
+        (err) => {
+          throw duplicateStation(err);
+        },
+      );
     }
-    const updated = serializeDevice(await loadOwnedDevice(req));
-    realtime.publishToUser(req.user.id, { type: 'device_updated', device: updated });
+    const updated = serializeDevice(await loadDevice(req), req.user);
+    // can_manage is per viewer, so leave it out of the broadcast.
+    const { can_manage, ...shared } = updated;
+    realtime.broadcast({ type: 'device_updated', device: shared });
     res.json({ device: updated });
   });
 
   router.delete('/:id', async (req, res) => {
-    const device = await loadOwnedDevice(req);
+    const device = await loadManagedDevice(req);
     await query('DELETE FROM devices WHERE id = $1', [device.id]);
-    realtime.publishToUser(req.user.id, { type: 'device_deleted', deviceId: device.id });
+    realtime.broadcast({ type: 'device_deleted', deviceId: device.id });
     res.status(204).end();
   });
 
   router.post('/:id/rotate-key', async (req, res) => {
-    const device = await loadOwnedDevice(req);
+    const device = await loadManagedDevice(req);
     const apiKey = generateDeviceKey();
     await query('UPDATE devices SET api_key_hash = $2 WHERE id = $1', [device.id, hashDeviceKey(apiKey)]);
     res.json({ apiKey });
@@ -131,7 +159,7 @@ export default function devicesRouter(realtime) {
    * Aggregated (average) time series; defaults to the last 24 h.
    */
   router.get('/:id/readings', async (req, res) => {
-    const device = await loadOwnedDevice(req);
+    const device = await loadDevice(req);
     const { fromDate, toDate, seconds } = resolveRange(req.query);
     let rows;
     if (seconds == null) {
@@ -160,7 +188,7 @@ export default function devicesRouter(realtime) {
    * Average pollution per hour of day — shows how foot traffic affects air quality.
    */
   router.get('/:id/hourly-profile', async (req, res) => {
-    const device = await loadOwnedDevice(req);
+    const device = await loadDevice(req);
     const { days } = z.object({ days: z.coerce.number().int().min(1).max(90).default(7) }).parse(req.query);
     const { rows } = await query(
       `SELECT extract(hour FROM recorded_at AT TIME ZONE $3)::int AS hour,
@@ -176,7 +204,7 @@ export default function devicesRouter(realtime) {
 
   /** GET /devices/:id/export.csv?from&to — raw readings for analysis in Excel / Python. */
   router.get('/:id/export.csv', async (req, res) => {
-    const device = await loadOwnedDevice(req);
+    const device = await loadDevice(req);
     const { fromDate, toDate } = resolveRange({ ...req.query, bucket: 'raw' });
     const { rows } = await query(
       `SELECT recorded_at, ${METRICS.join(', ')} FROM readings

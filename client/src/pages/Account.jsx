@@ -13,7 +13,7 @@ export default function Account() {
         <dl className="kv">
           <dt>Name</dt><dd>{user.name}</dd>
           <dt>Email</dt><dd>{user.email}</dd>
-          <dt>Devices</dt><dd>{devices?.length ?? '—'}</dd>
+          <dt>Stations</dt><dd>{devices?.length ?? '—'}</dd>
           <dt>Server</dt><dd>{API_BASE || window.location.origin}</dd>
         </dl>
       </section>
@@ -22,7 +22,7 @@ export default function Account() {
         <p className="small">
           <strong>AQI</strong> is calculated from PM2.5 using the US EPA 2024 breakpoints. <strong>VOC</strong> and{' '}
           <strong>NOx</strong> use the Sensirion index scale, where 100 (VOC) and 1 (NOx) are the normal baseline
-          for the place the sensor sits. Higher means more gas than usual. The overall level shown for a site is the worst of the three.
+          for the place the sensor sits. Higher means more gas than usual. The overall level shown for a station is the worst of the three.
         </p>
       </section>
       <button className="btn btn-danger" onClick={logout}>Sign out</button>

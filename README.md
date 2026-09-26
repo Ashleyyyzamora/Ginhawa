@@ -23,11 +23,15 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 
 ## Features
 
-- **Live dashboard**: every site's AQI, PM2.5, VOC and NOx, updating every few seconds over WebSocket
-- **Device detail**: health advice, all 8 measurements, history charts (1 h / 24 h / 7 d / 30 d)
+- **Stations**: each sensor is a station named after where it is placed (e.g. *Barangay Carmen*) plus an
+  optional landmark (e.g. *near the public market entrance*). Adding a sensor adds its station.
+- **Shared network**: every signed-in user sees every station, its live data and alerts. Only the person
+  who added a station can edit it, delete it or change its key.
+- **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating every few seconds over WebSocket
+- **Station detail**: health advice, all 8 measurements, history charts (1 h / 24 h / 7 d / 30 d)
 - **"Busiest hours"**: average pollution per hour of day, which shows how foot traffic affects air quality
-- **Alerts**: open automatically when a threshold is crossed and close when air recovers (thresholds editable per device)
-- **Device management**: per-device secret API keys (stored hashed, shown once, rotatable)
+- **Alerts**: open automatically when a threshold is crossed and close when air recovers (thresholds editable per station)
+- **Sensor keys**: each station's sensor gets a secret key (stored hashed, shown once, rotatable)
 - **CSV export** for analysis in Excel / Python (handy for the results chapter)
 - **Offline buffering**: the node keeps readings while Wi-Fi is down and uploads them as a batch later
 - **Simulator**: realistic rush-hour data for demos before the hardware is ready
@@ -59,7 +63,9 @@ local one. Click *Advanced → Proceed*. Sign in with the demo account the simul
 - **Email:** `demo@ginhawa.local`
 - **Password:** `ginhawa-demo`
 
-It loads 48 h of history for 3 simulated sites and then streams live data. Leave out
+It creates 3 placeholder stations ("Station 1 (placeholder)", …), loads 48 h of history and then streams
+live data. The placeholder stations are visible to every user, so delete them (station settings → Delete station,
+signed in as the demo user) once your real stations are running. Leave out
 `--profile simulator` to run without fake data.
 
 ### Open it on your phone (same Wi-Fi)
@@ -126,7 +132,7 @@ One module gives every value the app shows. The sketch is in `firmware/ginhawa_n
 
 Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 
-1. In the app: **Add device** → copy the key.
+1. In the app: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
 2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL and key.
 3. Install the libraries *Sensirion I2C SEN5X* and *ArduinoJson* and upload to the ESP32.
 
@@ -140,7 +146,7 @@ the server stays the same.
 > **About VOC/NOx values:** Sensirion sensors give an *index* (1–500), not ppm. VOC 100 and NOx 1
 > are the "normal" baseline the sensor learns for its location, and higher means more gas than usual.
 > Both need 5–10 minutes of warm-up and learn their baseline over about 12 h of running. The app's
-> overall level for a site is the worst of the PM2.5 AQI (US EPA 2024 breakpoints) and the VOC/NOx levels.
+> overall level for a station is the worst of the PM2.5 AQI (US EPA 2024 breakpoints) and the VOC/NOx levels.
 
 ---
 
@@ -155,12 +161,15 @@ Base URL `https://<host>/api/v1`. JSON everywhere. User endpoints need `Authoriz
 | POST | `/auth/login` | `{email, password}` → `{token, user}` |
 | GET | `/auth/me` | current user |
 
-### Devices (sensor nodes)
+### Stations (`/devices`, one sensor = one station)
+Every signed-in user can read every station. Changing one (PATCH, DELETE, rotate-key) is limited to the user
+who added it (`403` otherwise); each station has `can_manage` and `created_by` to show this.
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/devices` | your devices, each with `latest` reading (incl. `aqi`, `level`, `category`), `online`, `open_alerts` |
-| POST | `/devices` | `{name, location?, latitude?, longitude?}` → `{device, apiKey}` (**key shown once**) |
-| GET / PATCH / DELETE | `/devices/:id` | PATCH also accepts `pm25_threshold`, `voc_threshold`, `nox_threshold` |
+| GET | `/devices` | all stations, each with `latest` reading (incl. `aqi`, `level`, `category`), `online`, `open_alerts`, `created_by`, `can_manage` |
+| POST | `/devices` | `{name, landmark?}`, e.g. `{"name":"Barangay Carmen","landmark":"Near the public market"}` → `{device, apiKey}` (**key shown once**). `409` if the same name + landmark exists |
+| GET / PATCH / DELETE | `/devices/:id` | PATCH accepts `name`, `landmark`, `pm25_threshold`, `voc_threshold`, `nox_threshold` |
 | POST | `/devices/:id/rotate-key` | new `apiKey`; the old one stops working |
 | GET | `/devices/:id/readings?from&to&bucket` | time series; `bucket` = `auto` (default) \| `raw` \| `1m` `5m` `15m` `1h` `6h` `1d`; default last 24 h |
 | GET | `/devices/:id/hourly-profile?days=7` | average PM2.5 / VOC / NOx per hour of day |
@@ -186,21 +195,22 @@ lets the device drive a status LED.
 
 ### WebSocket `wss://<host>/ws`
 1. Send `{"type":"auth","token":"<JWT>"}` as the first message and receive `{"type":"ready"}`.
-2. After that the server pushes events for **your** devices only:
+2. After that the server pushes events for **all** stations:
    - `{"type":"reading","deviceId","reading"}`
    - `{"type":"alert","alert"}` / `{"type":"alert_resolved","alert"}`
-   - `{"type":"device_updated","device"}` / `{"type":"device_deleted","deviceId"}`
+   - `{"type":"device_created","deviceId"}` / `{"type":"device_updated","device"}` / `{"type":"device_deleted","deviceId"}`
 
 ---
 
 ## Database schema
 
-`users` → `devices` (owner, location, thresholds, hashed API key) → `readings` (time series,
+`users` → `devices` = stations (name, landmark, who added it, thresholds, hashed API key; name + landmark
+unique) → `readings` (time series,
 indexed on `(device_id, recorded_at)`) and `alerts` (at most one open alert per device+metric,
 enforced by a partial unique index). Migrations are in `server/src/migrations/` and run automatically at start-up.
 
 ## Ideas for next steps
 
 - Wrap the React app with **Capacitor** to ship a real Android APK with push notifications
-- Public, read-only map of all sites for the people passing through
+- Public, read-only page of all stations for the people passing through (no login)
 - Move `readings` to **TimescaleDB** hypertables if you collect months of data

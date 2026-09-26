@@ -66,7 +66,7 @@ export default function DeviceDetail() {
   if (devices && !device) {
     return (
       <>
-        <PageHeader title="Device not found" back="/" />
+        <PageHeader title="Station not found" back="/" />
         <p className="muted">It may have been deleted.</p>
       </>
     );
@@ -81,10 +81,10 @@ export default function DeviceDetail() {
     <>
       <PageHeader
         title={device.name}
-        subtitle={device.location}
+        subtitle={device.landmark}
         back="/"
         action={
-          <Link to={`/devices/${id}/settings`} className="icon-btn" aria-label="Device settings">
+          <Link to={`/devices/${id}/settings`} className="icon-btn" aria-label="Station settings">
             <Icon name="gear" />
           </Link>
         }
@@ -98,6 +98,7 @@ export default function DeviceDetail() {
           <p className="muted small">
             <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Online' : 'Offline'} · updated {timeAgo(device.last_seen_at, now)}
           </p>
+          <p className="muted small">Added by {device.created_by}</p>
         </div>
       </section>
 
@@ -161,7 +162,7 @@ export default function DeviceDetail() {
           <Link to="/alerts" className="link small">See all</Link>
         </div>
         {alerts.length === 0 ? (
-          <p className="muted small">No alerts for this device.</p>
+          <p className="muted small">No alerts for this station.</p>
         ) : (
           <ul className="plain-list">
             {alerts.map((a) => (

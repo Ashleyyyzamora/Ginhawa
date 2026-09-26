@@ -82,7 +82,7 @@ export async function ingestReadings(device, readings, realtime) {
   });
 
   const latest = withSummary(stored.reduce((a, b) => (b.recorded_at > a.recorded_at ? b : a)));
-  realtime.publishToUser(device.owner_id, { type: 'reading', deviceId: device.id, reading: latest });
-  for (const event of alertEvents) realtime.publishToUser(device.owner_id, event);
+  realtime.broadcast({ type: 'reading', deviceId: device.id, reading: latest });
+  for (const event of alertEvents) realtime.broadcast(event);
   return { count: stored.length, latest };
 }

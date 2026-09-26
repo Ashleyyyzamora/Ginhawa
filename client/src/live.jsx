@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, tokenStore, wsUrl } from './api.js';
 
-// Holds the user's devices and keeps them fresh from the WebSocket stream.
+// Holds all stations (devices) and keeps them fresh from the WebSocket stream.
 const LiveContext = createContext(null);
 
 export function LiveProvider({ children }) {
@@ -34,11 +34,13 @@ export function LiveProvider({ children }) {
       );
     } else if (msg.type === 'device_updated') {
       setDevices((list) => list?.map((d) => (d.id === msg.device.id ? { ...d, ...msg.device } : d)));
+    } else if (msg.type === 'device_created') {
+      refresh();
     } else if (msg.type === 'device_deleted') {
       setDevices((list) => list?.filter((d) => d.id !== msg.deviceId));
     }
     for (const fn of listeners.current) fn(msg);
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     let ws;

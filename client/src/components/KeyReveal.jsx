@@ -22,8 +22,10 @@ export default function KeyReveal({ apiKey }) {
         </button>
       </div>
       <details>
-        <summary>How the device uses it</summary>
-        <p className="muted small">Put the key in the firmware's <code>DEVICE_KEY</code>. Each reading is sent like this:</p>
+        <summary>How the sensor uses it</summary>
+        <p className="muted small">
+          Put the key in the firmware's <code>DEVICE_KEY</code> on the sensor placed at this station. Each reading is sent like this:
+        </p>
         <pre>{`curl -X POST ${origin}/api/v1/ingest \\
   -H "Content-Type: application/json" \\
   -H "X-Device-Key: ${apiKey}" \\

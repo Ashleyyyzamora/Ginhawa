@@ -87,7 +87,7 @@ function makeGenerator(site) {
 }
 
 async function setupDevice(token, site, existing) {
-  let device = existing.find((d) => d.name === site.name && d.can_manage);
+  let device = existing.find((d) => d.name === site.name);
   let apiKey;
   if (device) {
     ({ apiKey } = await api(`/devices/${device.id}/rotate-key`, { token, method: 'POST' }));
@@ -102,6 +102,10 @@ async function main() {
   console.log(`Simulator -> ${API_URL} as ${EMAIL}`);
   const token = await getToken();
   const { devices } = await api('/devices', { token });
+  const { user } = await api('/auth/me', { token });
+  if (user.role !== 'dev') {
+    throw new Error(`${EMAIL} is not a developer, so it cannot add stations. Add it to DEV_EMAILS and restart the server.`);
+  }
   const sims = [];
   for (const site of SITES.slice(0, DEVICE_COUNT)) sims.push(await setupDevice(token, site, devices));
 

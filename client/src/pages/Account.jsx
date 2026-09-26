@@ -13,9 +13,22 @@ export default function Account() {
         <dl className="kv">
           <dt>Name</dt><dd>{user.name}</dd>
           <dt>Email</dt><dd>{user.email}</dd>
+          <dt>Role</dt>
+          <dd>
+            <span className={`badge ${user.role === 'dev' ? 'badge-brand' : 'badge-muted'}`}>
+              {user.role === 'dev' ? 'Developer' : 'Viewer'}
+            </span>
+          </dd>
           <dt>Stations</dt><dd>{devices?.length ?? '—'}</dd>
           <dt>Server</dt><dd>{API_BASE || window.location.origin}</dd>
         </dl>
+      </section>
+      <section className="card">
+        <p className="small">
+          {user.role === 'dev'
+            ? 'As a developer you can add stations and change or delete any station.'
+            : 'You can view every station and acknowledge alerts. Only the Ginhawa team can add or change stations.'}
+        </p>
       </section>
       <section className="card">
         <h2>About the readings</h2>

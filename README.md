@@ -25,10 +25,15 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 
 - **Stations**: each sensor is a station named after where it is placed (e.g. *Barangay Carmen*) plus an
   optional landmark (e.g. *near the public market entrance*). Adding a sensor adds its station.
-- **Shared network**: every signed-in user sees every station, its live data and alerts. Only the person
-  who added a station can edit it, delete it or change its key.
+- **Two roles**: **developers** (the team, listed in `DEV_EMAILS`) add, edit and delete any station.
+  **Viewers** (anyone else who signs up) see every station, its live data and alerts, can acknowledge
+  alerts and download data, but can't change stations.
+- **Overview**: the worst air right now, stations online, active alerts and the worst station at a glance
+- **Search & sort** stations by barangay/landmark; sort by worst air, A–Z or most recently updated
 - **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating every few seconds over WebSocket
-- **Station detail**: health advice, all 8 measurements, history charts (1 h / 24 h / 7 d / 30 d)
+- **Station detail**: health advice, AQI color scale, all 8 measurements (tap one for a plain-language
+  explanation and its levels), history charts (1 h / 24 h / 7 d / 30 d)
+- **Pull-to-refresh**, in-app notifications when a new alert starts, and in-app confirm dialogs
 - **"Busiest hours"**: average pollution per hour of day, which shows how foot traffic affects air quality
 - **Alerts**: open automatically when a threshold is crossed and close when air recovers (thresholds editable per station)
 - **Sensor keys**: each station's sensor gets a secret key (stored hashed, shown once, rotatable)
@@ -53,7 +58,7 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```bash
-cp .env.example .env          # then set JWT_SECRET to a long random string
+cp .env.example .env          # set JWT_SECRET, and put your team's emails in DEV_EMAILS
 docker compose --profile simulator up --build
 ```
 
@@ -64,8 +69,21 @@ local one. Click *Advanced → Proceed*. Sign in with the demo account the simul
 - **Password:** `ginhawa-demo`
 
 It creates 3 placeholder stations ("Station 1 (placeholder)", …), loads 48 h of history and then streams
-live data. The placeholder stations are visible to every user, so delete them (station settings → Delete station,
-signed in as the demo user) once your real stations are running. Leave out
+live data. The placeholder stations are visible to every user, so delete them (station ⚙ → Delete station,
+signed in as a developer) once your real stations are running.
+
+### Who is a developer?
+
+Only emails listed in `DEV_EMAILS` (in `.env`, comma-separated) can add, edit or delete stations:
+
+```
+DEV_EMAILS=demo@ginhawa.local,ana@gmail.com,ben@gmail.com
+```
+
+Sign up in the app with one of those emails and you get the **Add station** tab. Everyone else is a
+viewer. After changing the list, restart the server (`docker compose up -d`); the change applies
+immediately, even to people who are already signed in. Keep `demo@ginhawa.local` in the list while you use
+the simulator, because it needs to add its placeholder stations. Leave out
 `--profile simulator` to run without fake data.
 
 ### Open it on your phone (same Wi-Fi)
@@ -95,7 +113,7 @@ createdb ginhawa   # or: docker run -d -p 5432:5432 -e POSTGRES_USER=ginhawa -e 
 
 # API → http://localhost:4000 (runs migrations on start)
 cd server && npm install
-DATABASE_URL=postgres://ginhawa:ginhawa@localhost:5432/ginhawa npm run dev
+DEV_EMAILS=demo@ginhawa.local,you@example.com DATABASE_URL=postgres://ginhawa:ginhawa@localhost:5432/ginhawa npm run dev
 
 # simulator (another terminal)
 cd server && npm run simulate -- --backfill 48 --devices 3
@@ -132,7 +150,7 @@ One module gives every value the app shows. The sketch is in `firmware/ginhawa_n
 
 Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 
-1. In the app: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
+1. In the app, signed in as a developer: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
 2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL and key.
 3. Install the libraries *Sensirion I2C SEN5X* and *ArduinoJson* and upload to the ESP32.
 
@@ -157,13 +175,13 @@ Base URL `https://<host>/api/v1`. JSON everywhere. User endpoints need `Authoriz
 ### Auth
 | Method | Path | Body / notes |
 |---|---|---|
-| POST | `/auth/register` | `{name, email, password(≥8)}` → `{token, user}` |
+| POST | `/auth/register` | `{name, email, password(≥8)}` → `{token, user}`; `user.role` is `dev` or `viewer` |
 | POST | `/auth/login` | `{email, password}` → `{token, user}` |
 | GET | `/auth/me` | current user |
 
 ### Stations (`/devices`, one sensor = one station)
-Every signed-in user can read every station. Changing one (PATCH, DELETE, rotate-key) is limited to the user
-who added it (`403` otherwise); each station has `can_manage` and `created_by` to show this.
+Every signed-in user can read every station. Adding or changing one (POST, PATCH, DELETE, rotate-key) is
+limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_manage` and `created_by`.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -179,7 +197,7 @@ who added it (`403` otherwise); each station has `can_manage` and `created_by` t
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/alerts?status=open\|all&device_id&limit` | newest first |
-| POST | `/alerts/:id/ack` | mark as acknowledged |
+| POST | `/alerts/:id/ack` | mark as acknowledged (any signed-in user) |
 
 ### Ingest (used by the sensor node)
 `POST /ingest` with header `X-Device-Key: gnh_…`

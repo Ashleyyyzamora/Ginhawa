@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { requireUser, signUserToken } from '../auth.js';
 import { HttpError } from '../http.js';
+import { isDevEmail } from '../config.js';
 
 const router = Router();
 
@@ -20,7 +21,13 @@ const loginSchema = z.object({
   password: z.string(),
 });
 
-const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, created_at: u.created_at });
+const publicUser = (u) => ({
+  id: u.id,
+  email: u.email,
+  name: u.name,
+  role: isDevEmail(u.email) ? 'dev' : 'viewer',
+  created_at: u.created_at,
+});
 
 router.post('/register', limiter, async (req, res) => {
   const body = registerSchema.parse(req.body);

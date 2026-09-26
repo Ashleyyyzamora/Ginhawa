@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { config } from '../config.js';
-import { requireUser, generateDeviceKey, hashDeviceKey } from '../auth.js';
+import { requireUser, requireDev, generateDeviceKey, hashDeviceKey } from '../auth.js';
 import { HttpError, isUuid } from '../http.js';
 import { METRICS, withSummary } from '../readings.js';
 
@@ -40,8 +40,8 @@ function serializeDevice(row, user) {
     online: Date.now() - lastSeen < config.offlineAfterSeconds * 1000,
     latest: withSummary(latest ?? null),
     open_alerts: open_alerts ?? 0,
-    // Stations are visible to everyone; only the user who added one may change it.
-    can_manage: owner_id === user.id,
+    // Stations are visible to everyone; only developers may change them.
+    can_manage: user.isDev,
   };
 }
 
@@ -62,9 +62,8 @@ async function loadDevice(req) {
 }
 
 async function loadManagedDevice(req) {
-  const device = await loadDevice(req);
-  if (device.owner_id !== req.user.id) throw new HttpError(403, 'Only the person who added this station can change it');
-  return device;
+  if (!req.user.isDev) throw new HttpError(403, 'Only developers can manage stations');
+  return loadDevice(req);
 }
 
 // The unique index on (name, landmark) turns duplicate stations into a clear message.
@@ -100,7 +99,7 @@ export default function devicesRouter(realtime) {
     res.json({ devices: rows.map((r) => serializeDevice(r, req.user)) });
   });
 
-  router.post('/', async (req, res) => {
+  router.post('/', requireDev, async (req, res) => {
     const body = createSchema.parse(req.body);
     const apiKey = generateDeviceKey();
     const { rows } = await query(
@@ -134,7 +133,7 @@ export default function devicesRouter(realtime) {
       );
     }
     const updated = serializeDevice(await loadDevice(req), req.user);
-    // can_manage is per viewer, so leave it out of the broadcast.
+    // can_manage depends on who is looking, so leave it out of the broadcast.
     const { can_manage, ...shared } = updated;
     realtime.broadcast({ type: 'device_updated', device: shared });
     res.json({ device: updated });

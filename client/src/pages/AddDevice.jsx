@@ -4,10 +4,12 @@ import { api } from '../api.js';
 import { useLive } from '../live.jsx';
 import { PageHeader } from '../components/Layout.jsx';
 import KeyReveal from '../components/KeyReveal.jsx';
+import { useUi } from '../components/ui.jsx';
 
 // Adding a station registers the sensor placed there (one device = one station).
 export default function AddDevice() {
   const { refresh } = useLive();
+  const { toast } = useUi();
   const [form, setForm] = useState({ name: '', landmark: '' });
   const [created, setCreated] = useState(null);
   const [error, setError] = useState(null);
@@ -19,7 +21,9 @@ export default function AddDevice() {
     setBusy(true);
     setError(null);
     try {
-      setCreated(await api.createDevice({ name: form.name, landmark: form.landmark || null }));
+      const result = await api.createDevice({ name: form.name, landmark: form.landmark || null });
+      setCreated(result);
+      toast(`${result.device.name} added`);
       refresh();
     } catch (err) {
       setError(err.message);

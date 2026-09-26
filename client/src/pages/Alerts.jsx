@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useLive } from '../live.jsx';
 import { PageHeader } from '../components/Layout.jsx';
+import { useUi } from '../components/ui.jsx';
 import { METRICS, duration, fmtDateTime } from '../format.js';
 
 export default function Alerts() {
   const { subscribe } = useLive();
+  const { toast } = useUi();
   const [status, setStatus] = useState('open');
   const [alerts, setAlerts] = useState(null);
   const [error, setError] = useState(null);
@@ -16,11 +18,19 @@ export default function Alerts() {
   }, [status]);
 
   useEffect(load, [load]);
-  useEffect(() => subscribe((msg) => (msg.type === 'alert' || msg.type === 'alert_resolved') && load()), [subscribe, load]);
+  useEffect(
+    () => subscribe((msg) => ['alert', 'alert_resolved', 'refresh'].includes(msg.type) && load()),
+    [subscribe, load],
+  );
 
   const ack = async (alert) => {
-    const { alert: updated } = await api.ackAlert(alert.id);
-    setAlerts((list) => list.map((a) => (a.id === updated.id ? updated : a)));
+    try {
+      const { alert: updated } = await api.ackAlert(alert.id);
+      setAlerts((list) => list.map((a) => (a.id === updated.id ? updated : a)));
+      toast('Alert acknowledged');
+    } catch (err) {
+      toast(err.message, { tone: 'danger' });
+    }
   };
 
   return (
@@ -46,7 +56,7 @@ export default function Alerts() {
               <li key={a.id} className={`card alert-card ${a.resolved_at ? 'resolved' : 'open'}`}>
                 <div className="alert-card-head">
                   <span className={`badge ${a.resolved_at ? 'badge-muted' : 'badge-warn'}`}>{a.resolved_at ? 'Resolved' : 'Ongoing'}</span>
-                  <Link to={`/devices/${a.device_id}`} className="link">{a.device_name}</Link>
+                  <Link to={`/devices/${a.device_id}`} className="link truncate">{a.device_name}</Link>
                 </div>
                 <p>
                   <strong>{m.label}</strong> reached <strong>{a.peak_value}{m.unit && ` ${m.unit}`}</strong>{' '}

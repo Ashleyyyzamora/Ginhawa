@@ -34,13 +34,18 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 - **Station detail**: health advice, AQI color scale, all 8 measurements (tap one for a plain-language
   explanation and its levels), history charts (1 h / 24 h / 7 d / 30 d)
 - **Pull-to-refresh**, in-app notifications when a new alert starts, and in-app confirm dialogs
+- **Light / Dark / System theme**: follows the phone by default; switch with the sun/moon button or in
+  Account → Appearance (remembered per device, no flash on load)
+- Look & feel modelled on **IQAir** and **Apple Weather**: an AQI hero card coloured by the current level,
+  health recommendations, a scrollable hourly AQI strip, weather-style reading tiles with gauges, large
+  titles that collapse on scroll, and grouped settings lists
 - **"Busiest hours"**: average pollution per hour of day, which shows how foot traffic affects air quality
 - **Alerts**: open automatically when a threshold is crossed and close when air recovers (thresholds editable per station)
 - **Sensor keys**: each station's sensor gets a secret key (stored hashed, shown once, rotatable)
 - **CSV export** for analysis in Excel / Python (handy for the results chapter)
 - **Offline buffering**: the node keeps readings while Wi-Fi is down and uploads them as a batch later
 - **Simulator**: realistic rush-hour data for demos before the hardware is ready
-- Light & dark mode, mobile-first, installable as an app (PWA)
+- Mobile-first, installable as an app (PWA)
 
 ## Repository layout
 

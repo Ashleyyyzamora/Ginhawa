@@ -95,3 +95,71 @@ export function duration(from, to = Date.now()) {
 export const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 export const fmtDateTime = (d) =>
   new Date(d).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+// Same EPA 2024 breakpoints the server uses; needed for the hourly AQI strip.
+const PM25_BREAKPOINTS = [
+  [0.0, 9.0, 0, 50],
+  [9.1, 35.4, 51, 100],
+  [35.5, 55.4, 101, 150],
+  [55.5, 125.4, 151, 200],
+  [125.5, 225.4, 201, 300],
+  [225.5, 325.4, 301, 500],
+];
+export function pm25ToAqi(pm25) {
+  if (pm25 == null || Number.isNaN(pm25)) return null;
+  const c = Math.max(0, Math.floor(pm25 * 10) / 10);
+  if (c > 325.4) return 500;
+  for (const [cLo, cHi, iLo, iHi] of PM25_BREAKPOINTS) {
+    if (c <= cHi) return Math.round(((iHi - iLo) / (cHi - cLo)) * (Math.max(c, cLo) - cLo) + iLo);
+  }
+  return 500;
+}
+
+/** Which pollutant is driving the overall level right now. */
+export function mainPollutant(r) {
+  if (!r) return null;
+  const candidates = [
+    ['pm25', pm25Level(r.pm25)],
+    ['voc_index', vocLevel(r.voc_index)],
+    ['nox_index', noxLevel(r.nox_index)],
+  ].filter(([, l]) => l != null);
+  if (!candidates.length) return null;
+  return candidates.reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+}
+
+/** IQAir-style health recommendations for each level. */
+export const HEALTH_TIPS = [
+  [
+    { icon: 'activity', text: 'Great time to be here or walk around' },
+    { icon: 'window', text: 'Open windows to let fresh air in' },
+  ],
+  [
+    { icon: 'activity', text: 'Sensitive people should limit long stays' },
+    { icon: 'window', text: 'Ventilate during quieter hours' },
+  ],
+  [
+    { icon: 'mask', text: 'Sensitive groups should wear a mask' },
+    { icon: 'activity', text: 'Reduce strenuous activity here' },
+    { icon: 'window', text: 'Close nearby windows' },
+  ],
+  [
+    { icon: 'mask', text: 'Wear a mask (KN95/N95)' },
+    { icon: 'activity', text: 'Avoid exercise and long stays' },
+    { icon: 'window', text: 'Keep windows closed' },
+    { icon: 'fan', text: 'Use an air purifier indoors if available' },
+  ],
+  [
+    { icon: 'mask', text: 'Everyone should wear an N95 mask' },
+    { icon: 'avoid', text: 'Avoid lingering in this area' },
+    { icon: 'window', text: 'Keep windows closed' },
+    { icon: 'fan', text: 'Run an air purifier indoors' },
+  ],
+  [
+    { icon: 'avoid', text: 'Avoid the area' },
+    { icon: 'mask', text: 'N95 mask if you must pass through' },
+    { icon: 'home', text: 'Stay indoors with windows closed' },
+  ],
+];
+
+/** Where a value sits on a metric's scale (0..1) for the small gauges on reading tiles. */
+export const GAUGE_MAX = { pm1: 150, pm25: 150, pm4: 200, pm10: 250, voc_index: 500, nox_index: 500, temperature: 45, humidity: 100 };

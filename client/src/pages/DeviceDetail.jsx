@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useLive, useNow } from '../live.jsx';
 import { PageHeader } from '../components/Layout.jsx';
-import { AqiDisc, LevelTag } from '../components/Aqi.jsx';
 import MetricTile from '../components/MetricTile.jsx';
 import { HistoryChart, HourlyChart } from '../components/Charts.jsx';
 import Icon from '../components/Icon.jsx';
-import AqiScale from '../components/AqiScale.jsx';
+import { HealthTips, HourlyStrip, StationHero } from '../components/StationHero.jsx';
 import { useUi } from '../components/ui.jsx';
-import { METRICS, duration, fmtDateTime, isOnline, levelInfo, timeAgo } from '../format.js';
+import { METRICS, duration, fmtDateTime, isOnline } from '../format.js';
 
 const RANGES = [
   { key: '1h', label: '1H', ms: 3600e3, bucket: 'raw' },
@@ -39,6 +38,7 @@ export default function DeviceDetail() {
   const [points, setPoints] = useState(null);
   const [profile, setProfile] = useState(null);
   const [alerts, setAlerts] = useState([]);
+  const [hourly, setHourly] = useState(null);
 
   useEffect(() => {
     setPoints(null);
@@ -50,6 +50,20 @@ export default function DeviceDetail() {
     api.hourlyProfile(id, 7).then((r) => setProfile(r.hours)).catch(() => setProfile([]));
     api.alerts({ device_id: id, limit: 5 }).then((r) => setAlerts(r.alerts)).catch(() => {});
   }, [id, reloadKey]);
+
+  // Hourly strip: refreshed on load, pull-to-refresh, and at most every 5 minutes of live data.
+  const hourlyAt = useRef(0);
+  useEffect(() => {
+    const load = () => {
+      hourlyAt.current = Date.now();
+      const from = new Date(Math.floor(Date.now() / 3600e3) * 3600e3 - 11 * 3600e3).toISOString();
+      api.readings(id, { from, bucket: '1h' }).then((res) => setHourly(res.points)).catch(() => setHourly([]));
+    };
+    load();
+    return subscribe((msg) => {
+      if (msg.type === 'reading' && msg.deviceId === id && Date.now() - hourlyAt.current > 5 * 60e3) load();
+    });
+  }, [id, reloadKey, subscribe]);
 
   // Live: append new readings to the 1-hour chart and keep the alert list fresh.
   useEffect(
@@ -94,7 +108,6 @@ export default function DeviceDetail() {
 
   const r = device.latest;
   const online = isOnline(device, now);
-  const info = levelInfo(r?.level);
 
   return (
     <>
@@ -111,23 +124,13 @@ export default function DeviceDetail() {
         }
       />
 
-      <section className={`card hero-card lvl-${r?.level ?? 'none'}`}>
-        <div className="hero">
-          <AqiDisc reading={r} size="lg" />
-          <div>
-            <LevelTag level={r?.level} />
-            <p className="hero-advice">{info.advice}</p>
-            <p className="muted small">
-              <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Online' : 'Offline'} · updated {timeAgo(device.last_seen_at, now)}
-            </p>
-          </div>
-        </div>
-        <AqiScale aqi={r?.aqi} />
-        <p className="muted small">
-          The overall level is the worst of PM2.5, VOC and NOx. Tap any reading below to learn what it means.
-        </p>
-      </section>
+      <StationHero reading={r} online={online} lastSeen={device.last_seen_at} now={now} />
 
+      <HealthTips level={r?.level} />
+
+      <HourlyStrip points={hourly} />
+
+      <h2 className="section-label">Readings</h2>
       <section className="tile-grid" aria-label="Latest readings">
         {['pm25', 'voc_index', 'nox_index', 'pm10', 'pm1', 'pm4', 'temperature', 'humidity'].map((m, i) => (
           <MetricTile key={m} metric={m} value={r?.[m]} emphasis={i < 3} />

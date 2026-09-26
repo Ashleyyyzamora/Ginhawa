@@ -6,7 +6,7 @@ import { PageHeader } from '../components/Layout.jsx';
 import MetricTile from '../components/MetricTile.jsx';
 import { HistoryChart, HourlyChart } from '../components/Charts.jsx';
 import Icon from '../components/Icon.jsx';
-import { HealthTips, HourlyStrip, StationHero } from '../components/StationHero.jsx';
+import { HealthTips, HourlyStrip, StationHero, StationStatus } from '../components/StationHero.jsx';
 import { useUi } from '../components/ui.jsx';
 import { METRICS, duration, fmtDateTime, isOnline } from '../format.js';
 
@@ -71,7 +71,11 @@ export default function DeviceDetail() {
       subscribe((msg) => {
         if (msg.type === 'refresh') setReloadKey((k) => k + 1);
         if (msg.type === 'reading' && msg.deviceId === id && range.key === '1h') {
-          setPoints((p) => (p ? [...p, { ...msg.reading, t: msg.reading.recorded_at }] : p));
+          // Plot PM only where it was actually measured in this upload (not carried forward).
+          const r = msg.reading;
+          const measured = r.pm_recorded_at === r.recorded_at;
+          const point = { ...r, t: r.recorded_at, ...(!measured && { pm1: null, pm25: null, pm4: null, pm10: null }) };
+          setPoints((p) => (p ? [...p, point] : p));
         }
         if ((msg.type === 'alert' || msg.type === 'alert_resolved') && msg.alert.device_id === id) {
           setAlerts((list) => [msg.alert, ...list.filter((a) => a.id !== msg.alert.id)].slice(0, 5));
@@ -125,6 +129,8 @@ export default function DeviceDetail() {
       />
 
       <StationHero reading={r} online={online} lastSeen={device.last_seen_at} now={now} />
+
+      <StationStatus device={device} now={now} />
 
       <HealthTips level={r?.level} />
 

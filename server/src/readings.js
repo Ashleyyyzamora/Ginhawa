@@ -1,7 +1,16 @@
 import { withTransaction } from './db.js';
 import { summarize } from './aqi.js';
 
-export const METRICS = ['pm1', 'pm25', 'pm4', 'pm10', 'voc_index', 'nox_index', 'temperature', 'humidity'];
+// Numeric columns of a reading (averaged in history queries, exported to CSV).
+export const METRICS = [
+  'pm1', 'pm25', 'pm4', 'pm10', 'voc_index', 'nox_index', 'temperature', 'humidity',
+  'battery_voltage', 'battery_current',
+];
+export const PM_FIELDS = ['pm1', 'pm25', 'pm4', 'pm10'];
+
+// Stations measure particles for 1 minute in every 5 to save power, so most uploads carry
+// no PM values. The latest particle reading stays valid for this long (two PM cycles).
+export const PM_CARRY_MS = 10 * 60 * 1000;
 const ALERT_METRICS = [
   ['pm25', 'pm25_threshold'],
   ['voc_index', 'voc_threshold'],
@@ -10,6 +19,23 @@ const ALERT_METRICS = [
 
 /** Adds the computed AQI / level / category to a reading row. */
 export const withSummary = (r) => (r ? { ...r, ...summarize(r) } : null);
+
+/**
+ * Fills a reading's missing PM values from the station's last particle measurement, if that
+ * measurement is recent enough, and records when the PM values were measured (pm_recorded_at).
+ */
+export function withCarriedPm(latest, lastPm) {
+  if (!latest) return null;
+  if (latest.pm25 != null) return { ...latest, pm_recorded_at: latest.recorded_at };
+  if (!lastPm || new Date(latest.recorded_at) - new Date(lastPm.recorded_at) > PM_CARRY_MS) {
+    return { ...latest, pm_recorded_at: lastPm?.recorded_at ?? null };
+  }
+  const pm = Object.fromEntries(PM_FIELDS.map((f) => [f, latest[f] ?? lastPm[f]]));
+  return { ...latest, ...pm, pm_recorded_at: lastPm.recorded_at };
+}
+
+export const LAST_PM_SQL = `SELECT pm1, pm25, pm4, pm10, recorded_at FROM readings
+  WHERE device_id = $1 AND pm25 IS NOT NULL ORDER BY recorded_at DESC LIMIT 1`;
 
 /**
  * Walks the batch in time order and opens / updates / resolves alerts, so readings a
@@ -66,23 +92,43 @@ async function evaluateAlerts(db, device, readings) {
  * events to the device owner. Returns the newest stored reading.
  */
 export async function ingestReadings(device, readings, realtime) {
-  const { stored, alertEvents } = await withTransaction(async (db) => {
+  const result = await withTransaction(async (db) => {
     const { rows: stored } = await db.query(
-      `INSERT INTO readings (device_id, recorded_at, ${METRICS.join(', ')})
-       SELECT $1, r.recorded_at, ${METRICS.map((m) => `r.${m}`).join(', ')}
+      `INSERT INTO readings (device_id, recorded_at, network, ${METRICS.join(', ')})
+       SELECT $1, r.recorded_at, r.network, ${METRICS.map((m) => `r.${m}`).join(', ')}
        FROM jsonb_to_recordset($2::jsonb) AS r(
-         recorded_at timestamptz, ${METRICS.map((m) => `${m} real`).join(', ')})
+         recorded_at timestamptz, network text, ${METRICS.map((m) => `${m} real`).join(', ')})
        RETURNING *`,
       [device.id, JSON.stringify(readings)],
     );
     await db.query('UPDATE devices SET last_seen_at = now() WHERE id = $1', [device.id]);
 
+    // The station reports its own GPS position; keep the newest fix from this batch.
+    const fix = readings
+      .filter((r) => r.latitude != null && r.longitude != null)
+      .sort((a, b) => Date.parse(b.recorded_at) - Date.parse(a.recorded_at))[0];
+    if (fix) {
+      await db.query(
+        `UPDATE devices SET latitude = $2, longitude = $3, location_updated_at = $4
+         WHERE id = $1 AND (location_updated_at IS NULL OR location_updated_at <= $4)`,
+        [device.id, fix.latitude, fix.longitude, fix.recorded_at],
+      );
+    }
+
     const alertEvents = await evaluateAlerts(db, device, stored);
-    return { stored, alertEvents };
+    const newest = stored.reduce((a, b) => (b.recorded_at > a.recorded_at ? b : a));
+    const { rows: lastPm } = newest.pm25 == null ? await db.query(LAST_PM_SQL, [device.id]) : { rows: [] };
+    return { stored, alertEvents, latest: withCarriedPm(newest, lastPm[0]), location: fix };
   });
 
-  const latest = withSummary(stored.reduce((a, b) => (b.recorded_at > a.recorded_at ? b : a)));
-  realtime.broadcast({ type: 'reading', deviceId: device.id, reading: latest });
+  const latest = withSummary(result.latest);
+  const { stored, alertEvents, location } = result;
+  realtime.broadcast({
+    type: 'reading',
+    deviceId: device.id,
+    reading: latest,
+    ...(location && { location: { latitude: location.latitude, longitude: location.longitude, updated_at: location.recorded_at } }),
+  });
   for (const event of alertEvents) realtime.broadcast(event);
   return { count: stored.length, latest };
 }

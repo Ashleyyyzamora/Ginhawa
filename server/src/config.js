@@ -12,8 +12,9 @@ export const config = {
   // Optional: serve HTTPS directly from Node (when not running behind the Caddy proxy).
   tlsKeyFile: env.TLS_KEY_FILE,
   tlsCertFile: env.TLS_CERT_FILE,
-  // A device that has not reported for this long is shown as offline.
-  offlineAfterSeconds: Number(env.OFFLINE_AFTER_SECONDS ?? 120),
+  // A station that has not reported for this long is shown as offline.
+  // Stations upload once a minute, so this allows a few missed uploads.
+  offlineAfterSeconds: Number(env.OFFLINE_AFTER_SECONDS ?? 300),
   // Used for "hour of day" foot-traffic profiles.
   timezone: env.TZ_NAME ?? 'Asia/Manila',
   // Developers (comma-separated emails) can add and manage stations. Everyone else can view.

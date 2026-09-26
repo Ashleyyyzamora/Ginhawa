@@ -30,7 +30,7 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
   alerts and download data, but can't change stations.
 - **Overview**: the worst air right now, stations online, active alerts and the worst station at a glance
 - **Search & sort** stations by barangay/landmark; sort by worst air, A–Z or most recently updated
-- **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating every few seconds over WebSocket
+- **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating live over WebSocket as each station reports (once a minute)
 - **Station detail**: health advice, AQI color scale, all 8 measurements (tap one for a plain-language
   explanation and its levels), history charts (1 h / 24 h / 7 d / 30 d)
 - **Pull-to-refresh**, in-app notifications when a new alert starts, and in-app confirm dialogs
@@ -141,23 +141,34 @@ To serve HTTPS straight from Node (no Caddy), set `TLS_KEY_FILE` and `TLS_CERT_F
 
 ## Hardware
 
-### Recommended (simplest wiring): ESP32 + Sensirion SEN55
+### Compact solar station (the design in the proposal)
 
-One module gives every value the app shows. The sketch is in `firmware/ginhawa_node/`.
+One compact unit (≈200 × 120 × 265 mm, ≈1.3 kg) plus a small solar panel. Full wiring:
+`docs/diagrams/03-circuit-schematic.png`; parts list: `docs/diagrams/03-circuit-notes.md`.
 
 | Part | Approx. price | Notes |
 |---|---|---|
-| ESP32 DevKit v1 | ₱350 | Wi-Fi, HTTPS capable |
+| LilyGO **T-SIM7600G-H** | ₱2,600–3,500 | ESP32 + 4G LTE + GPS modem |
 | Sensirion **SEN55** | ₱2,000–2,800 | PM1/2.5/4/10 + VOC + NOx + T/RH over I2C |
-| JST GHR-06V cable, 2× 10 kΩ resistors | ₱150 | I2C pull-ups |
-| 18650 cell + TP4056 charger + 5 V boost | ₱300 | makes it portable |
-| RGB LED / buzzer (optional) | ₱50 | local "air is bad" indicator |
+| INA219 module | ₱150–250 | battery voltage and current |
+| 4× LiFePO4 32700 6 Ah + 1S BMS | ₱1,150–1,900 | 3.2 V 24 Ah (≈77 Wh) pack, ≈0.6 kg |
+| 1S LiFePO4 solar charger + 6 V 10 W panel | ₱650–1,300 | recharges the pack |
+| 3.2 → 5 V 3 A boost + 1000 µF capacitor | ₱150–300 | powers board and sensor |
+| IP65 box 200×120×75 mm + 3D-printed radiation shield | ₱650–1,500 | enclosure |
+
+**Power-saving schedule** (≈14 Wh/day, ≈4 days without sun): VOC, NOx, temperature and humidity are
+sampled every second; the SEN55 fan and laser run **1 minute in every 5** for particles; the station
+averages and uploads **once a minute**. The server carries the latest particle reading forward for up
+to 10 minutes so the AQI stays continuous, and marks a station offline after 5 minutes of silence.
 
 Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 
 1. In the app, signed in as a developer: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
 2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL and key.
-3. Install the libraries *Sensirion I2C SEN5X* and *ArduinoJson* and upload to the ESP32.
+3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219* and *ArduinoJson* and upload.
+
+LTE fallback and GPS through the SIM7600 are the next firmware sprint; the server and app already
+accept and show `network`, `latitude` and `longitude`.
 
 ### Budget alternative
 
@@ -192,7 +203,7 @@ limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_ma
 |---|---|---|
 | GET | `/devices` | all stations, each with `latest` reading (incl. `aqi`, `level`, `category`), `online`, `open_alerts`, `created_by`, `can_manage` |
 | POST | `/devices` | `{name, landmark?}`, e.g. `{"name":"Barangay Carmen","landmark":"Near the public market"}` → `{device, apiKey}` (**key shown once**). `409` if the same name + landmark exists |
-| GET / PATCH / DELETE | `/devices/:id` | PATCH accepts `name`, `landmark`, `pm25_threshold`, `voc_threshold`, `nox_threshold` |
+| GET / PATCH / DELETE | `/devices/:id` | PATCH accepts `name`, `landmark`, `pm25_threshold`, `voc_threshold`, `nox_threshold`, and `latitude` + `longitude` (manual location) |
 | POST | `/devices/:id/rotate-key` | new `apiKey`; the old one stops working |
 | GET | `/devices/:id/readings?from&to&bucket` | time series; `bucket` = `auto` (default) \| `raw` \| `1m` `5m` `15m` `1h` `6h` `1d`; default last 24 h |
 | GET | `/devices/:id/hourly-profile?days=7` | average PM2.5 / VOC / NOx per hour of day |
@@ -210,9 +221,14 @@ limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_ma
 ```json
 { "pm1": 10.2, "pm25": 15.1, "pm4": 17.0, "pm10": 19.8,
   "voc_index": 120, "nox_index": 4, "temperature": 30.5, "humidity": 68,
+  "battery_voltage": 3.31, "battery_current": -0.12, "network": "wifi",
+  "latitude": 8.4822, "longitude": 124.6472,
   "recorded_at": "2026-09-26T06:00:00Z" }
 ```
-All fields are optional. `recorded_at` defaults to the server time. Send `{"readings": [ … up to 500 … ]}`
+All fields are optional. Leave the PM fields out when particles weren't measured (4 of every 5
+uploads); the server then reports the last particle reading (up to 10 minutes old) with its
+`pm_recorded_at`. `battery_current` is positive while charging. `latitude`/`longitude` must be
+sent together and update the station's map location. `recorded_at` defaults to the server time. Send `{"readings": [ … up to 500 … ]}`
 to upload a buffered batch. The response `{"accepted": 1, "status": {"aqi": 57, "level": 1, "category": "Moderate"}}`
 lets the device drive a status LED.
 

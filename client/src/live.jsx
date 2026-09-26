@@ -27,7 +27,18 @@ export function LiveProvider({ children }) {
     if (msg.type === 'reading') {
       setDevices((list) =>
         list?.map((d) =>
-          d.id === msg.deviceId ? { ...d, latest: msg.reading, last_seen_at: new Date().toISOString() } : d,
+          d.id === msg.deviceId
+            ? {
+                ...d,
+                latest: msg.reading,
+                last_seen_at: new Date().toISOString(),
+                ...(msg.location && {
+                  latitude: msg.location.latitude,
+                  longitude: msg.location.longitude,
+                  location_updated_at: msg.location.updated_at,
+                }),
+              }
+            : d,
         ),
       );
     } else if (msg.type === 'alert' || msg.type === 'alert_resolved') {

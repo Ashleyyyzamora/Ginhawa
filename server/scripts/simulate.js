@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Simulates one or more Ginhawa stations (sensor nodes) so the app can be demoed without hardware.
 //
-//   node scripts/simulate.js                    # stream live readings every 5 s
+//   node scripts/simulate.js                    # stream live readings every 60 s (like a real station)
 //   node scripts/simulate.js --backfill 48      # first upload 48 h of history, then stream
 //   node scripts/simulate.js --devices 3        # simulate 3 stations
 //
@@ -11,7 +11,10 @@
 const API_URL = (process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '') + '/api/v1';
 const EMAIL = process.env.SIM_EMAIL ?? 'demo@ginhawa.local';
 const PASSWORD = process.env.SIM_PASSWORD ?? 'ginhawa-demo';
-const INTERVAL = Number(process.env.SIM_INTERVAL_SECONDS ?? 5) * 1000;
+const INTERVAL = Number(process.env.SIM_INTERVAL_SECONDS ?? 60) * 1000;
+// Like the real firmware, particles are measured 1 minute in every 5 (every 5th upload);
+// the other uploads carry VOC, NOx, temperature, humidity and battery data only.
+const PM_EVERY = 5;
 
 const args = process.argv.slice(2);
 const argValue = (name, fallback) => {
@@ -27,7 +30,7 @@ const SITES = [
   { name: 'Station 1 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.2 },
   { name: 'Station 2 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.8 },
   { name: 'Station 3 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.6 },
-  { name: 'Station 4 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.5 },
+  { name: 'Station 4 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.5, network: 'lte' },
 ];
 
 async function api(path, { token, deviceKey, body, method = body ? 'POST' : 'GET' } = {}) {
@@ -61,10 +64,36 @@ function footTraffic(date) {
   return 0.08 + bump(7.5, 1.2, 1) + bump(12.2, 1, 0.55) + bump(18, 1.5, 0.95);
 }
 
+// Resting-voltage curve of one LiFePO4 cell (state of charge 0..1 -> volts).
+const OCV = [[0, 3.0], [0.1, 3.2], [0.2, 3.24], [0.4, 3.28], [0.6, 3.3], [0.8, 3.32], [0.95, 3.35], [1, 3.4]];
+const ocv = (soc) => {
+  for (let i = 1; i < OCV.length; i++) {
+    if (soc <= OCV[i][0]) {
+      const [s0, v0] = OCV[i - 1];
+      const [s1, v1] = OCV[i];
+      return v0 + ((soc - s0) / (s1 - s0)) * (v1 - v0);
+    }
+  }
+  return 3.4;
+};
+
 function makeGenerator(site) {
   let spike = 0; // decaying pollution event (e.g. idling bus, cleaning spray)
   let drift = 0;
+  let n = 0;
+  let soc = 0.7; // battery state of charge
+  let lastTime = null;
   return (date) => {
+    // Battery: 10 W panel by day (Manila time), ~0.6 W station load, 3.2 V pack of 77 Wh.
+    const hours = lastTime ? Math.min(1, (date - lastTime) / 3600e3) : 0;
+    lastTime = date;
+    const hLocal = (date.getUTCHours() + 8 + date.getUTCMinutes() / 60) % 24;
+    const sun = Math.max(0, Math.sin((Math.PI * (hLocal - 6)) / 12));
+    let netW = 10 * 0.75 * sun * (0.7 + 0.3 * Math.random()) - 0.6;
+    if (soc >= 0.999 && netW > 0) netW = 0; // charger stops at full
+    soc = Math.min(1, Math.max(0.05, soc + (netW * hours) / 77));
+    const current = netW / 3.25;
+    const includePm = n++ % PM_EVERY === 0;
     const t = footTraffic(date) * site.traffic;
     if (Math.random() < 0.004) spike = 25 + Math.random() * 60;
     spike *= 0.93;
@@ -74,10 +103,15 @@ function makeGenerator(site) {
     const hourOfDay = (date.getUTCHours() + 8) % 24;
     return {
       recorded_at: date.toISOString(),
-      pm1: +(pm25 * 0.68).toFixed(1),
-      pm25: +pm25.toFixed(1),
-      pm4: +(pm25 * 1.12).toFixed(1),
-      pm10: +(pm25 * 1.35 + noise(2)).toFixed(1),
+      ...(includePm && {
+        pm1: +(pm25 * 0.68).toFixed(1),
+        pm25: +pm25.toFixed(1),
+        pm4: +(pm25 * 1.12).toFixed(1),
+        pm10: +(pm25 * 1.35 + noise(2)).toFixed(1),
+      }),
+      battery_voltage: +(ocv(soc) + current * 0.02).toFixed(3),
+      battery_current: +current.toFixed(3),
+      network: site.network ?? 'wifi',
       voc_index: Math.round(Math.min(500, Math.max(1, 95 + 140 * t + spike * 1.5 + noise(12)))),
       nox_index: Math.round(Math.min(500, Math.max(1, 1 + 28 * t + spike * 0.6 + noise(3)))),
       temperature: +(27 + 5 * Math.sin(((hourOfDay - 9) / 24) * 2 * Math.PI) + 1.2 * t + noise(0.4)).toFixed(1),
@@ -132,7 +166,7 @@ async function main() {
       try {
         const reading = sim.generate(new Date());
         const { status } = await api('/ingest', { deviceKey: sim.apiKey, body: reading });
-        console.log(`${sim.device.name}: PM2.5 ${reading.pm25} VOC ${reading.voc_index} NOx ${reading.nox_index} -> ${status.category}`);
+        console.log(`${sim.device.name}: PM2.5 ${reading.pm25 ?? '(not measured)'} VOC ${reading.voc_index} NOx ${reading.nox_index} -> ${status.category}`);
       } catch (err) {
         console.error(`${sim.device.name}: ${err.message}`);
       }

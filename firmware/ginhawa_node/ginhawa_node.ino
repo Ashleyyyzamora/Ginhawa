@@ -1,26 +1,28 @@
 /*
- * Ginhawa sensor node: ESP32 + Sensirion SEN55
+ * Ginhawa monitoring station: LilyGO T-SIM7600 (ESP32) + Sensirion SEN55 + INA219
  *
- * The SEN55 is a single I2C module that measures PM1.0 / PM2.5 / PM4.0 / PM10,
- * VOC index, NOx index, temperature and humidity: everything Ginhawa needs.
+ * Power-saving schedule (compact solar/LiFePO4 design, see docs/diagrams):
+ *   - VOC index, NOx index, temperature and humidity: sampled every second
+ *   - particles (PM1.0/2.5/4.0/10): the SEN55 fan and laser run 1 minute in every 5;
+ *     the first 30 s after start-up are discarded, the rest are averaged
+ *   - every minute: average the samples, read battery voltage/current, and upload
  *
- * Wiring (SEN55 JST GHR-06V cable):
- *   pin 1 VDD -> 5V (VIN)     pin 2 GND -> GND
- *   pin 3 SDA -> GPIO 21      pin 4 SCL -> GPIO 22
- *   pin 5 SEL -> GND (selects I2C)   pin 6 NC
- *   add 4.7 kΩ pull-ups from SDA and SCL to 3.3 V (see docs/diagrams/03-circuit-schematic)
+ * Wiring (see docs/diagrams/03-circuit-schematic):
+ *   SEN55 pin 1 VDD -> 5 V, pin 2 GND, pin 3 SDA -> GPIO21, pin 4 SCL -> GPIO22,
+ *   pin 5 SEL -> GND (I2C), pin 6 NC; 4.7 kΩ pull-ups from SDA/SCL to 3.3 V.
+ *   INA219 on the same I2C bus (0x40), in series with the battery (+ = charging).
  *
  * Libraries (Arduino Library Manager):
- *   - "Sensirion I2C SEN5X" (and its dependency "Sensirion Core")
- *   - "ArduinoJson" v7
- * Board: "ESP32 Dev Module" (esp32 by Espressif)
+ *   "Sensirion I2C SEN5X" (+ "Sensirion Core"), "Adafruit INA219", "ArduinoJson" v7
+ * Board: "ESP32 Wrover Module" (esp32 by Espressif)
  *
- * Behaviour:
- *   - averages the 1 Hz sensor readings over REPORT_INTERVAL_MS
- *   - POSTs JSON to  {API_BASE_URL}/api/v1/ingest  with header X-Device-Key over HTTPS
- *   - if Wi-Fi or the server is down, keeps up to MAX_BUFFER readings in RAM and
- *     uploads them as one batch when the connection comes back
- *   - the server replies with the current air-quality level, shown on the status LED
+ * Upload: POST {API_BASE_URL}/api/v1/ingest with header X-Device-Key, JSON
+ *   {"readings":[{recorded_at, pm1..pm10 (only when measured), voc_index, nox_index,
+ *                 temperature, humidity, battery_voltage, battery_current, network}]}
+ * Readings are buffered while offline and sent as one batch when the connection returns.
+ *
+ * Next sprint: 4G LTE fallback and GPS through the SIM7600 modem (TinyGSM). Until then
+ * the station uploads over Wi-Fi only and reports network = "wifi".
  */
 #include <Arduino.h>
 #include <WiFi.h>
@@ -30,23 +32,32 @@
 #include <time.h>
 #include <ArduinoJson.h>
 #include <SensirionI2CSen5x.h>
+#include <Adafruit_INA219.h>
 #include "config.h"
 
-static const size_t MAX_BUFFER = 120;  // 20 minutes at a 10 s interval
+static const size_t MAX_BUFFER = 240;  // 4 hours at one reading per minute
 
 struct Reading {
   time_t ts;  // 0 when the clock wasn't synced yet: the server then uses its own time
-  float pm1, pm25, pm4, pm10, voc, nox, temp, rh;
+  float pm1, pm25, pm4, pm10, voc, nox, temp, rh, battV, battA;
 };
 
 SensirionI2CSen5x sen5x;
+Adafruit_INA219 ina219(INA219_ADDR);
+bool haveIna = false;
 Reading buffer[MAX_BUFFER];
 size_t buffered = 0;
 
-// Running sums for averaging
-struct Acc { double sum = 0; uint16_t n = 0; void add(float v) { if (!isnan(v)) { sum += v; n++; } } float avg() const { return n ? sum / n : NAN; } };
-Acc aPm1, aPm25, aPm4, aPm10, aVoc, aNox, aTemp, aRh;
-unsigned long lastReport = 0, lastSample = 0;
+struct Acc {
+  double sum = 0;
+  uint16_t n = 0;
+  void add(float v) { if (!isnan(v)) { sum += v; n++; } }
+  float avg() const { return n ? sum / n : NAN; }
+};
+Acc aPm1, aPm25, aPm4, aPm10, aVoc, aNox, aTemp, aRh, aV, aA;
+
+unsigned long lastReport = 0, lastSample = 0, pmStartedAt = 0;
+bool pmOn = false;
 
 // ---------------------------------------------------------------- helpers
 
@@ -72,6 +83,14 @@ void addField(JsonObject o, const char *key, float v, int digits) {
   if (!isnan(v)) o[key] = serialized(String(v, digits));
 }
 
+// Particle sensing on/off: full measurement mode vs. the SEN55's gas/RH/T-only mode.
+void setPm(bool on) {
+  uint16_t err = on ? sen5x.startMeasurement() : sen5x.startMeasurementWithoutPm();
+  if (err) Serial.printf("SEN55 mode change error %u\n", err);
+  pmOn = on;
+  if (on) pmStartedAt = millis();
+}
+
 // ---------------------------------------------------------------- upload
 
 bool upload() {
@@ -89,7 +108,7 @@ bool upload() {
       strftime(iso, sizeof iso, "%Y-%m-%dT%H:%M:%SZ", gmtime(&r.ts));
       o["recorded_at"] = iso;
     }
-    addField(o, "pm1", r.pm1, 1);
+    addField(o, "pm1", r.pm1, 1);  // omitted (NaN) outside the particle window
     addField(o, "pm25", r.pm25, 1);
     addField(o, "pm4", r.pm4, 1);
     addField(o, "pm10", r.pm10, 1);
@@ -97,6 +116,9 @@ bool upload() {
     addField(o, "nox_index", r.nox, 0);
     addField(o, "temperature", r.temp, 1);
     addField(o, "humidity", r.rh, 1);
+    addField(o, "battery_voltage", r.battV, 3);
+    addField(o, "battery_current", r.battA, 3);
+    o["network"] = "wifi";
   }
   String body;
   serializeJson(doc, body);
@@ -117,10 +139,8 @@ bool upload() {
   if (code == 201) {
     JsonDocument res;
     if (!deserializeJson(res, resp)) {
-      int level = res["status"]["level"] | 0;
-      Serial.printf("Uploaded %u reading(s): AQI %d, %s\n", (unsigned)buffered, res["status"]["aqi"] | -1,
-                    (const char *)(res["status"]["category"] | "?"));
-      setLed(level);
+      Serial.printf("Uploaded %u reading(s): %s\n", (unsigned)buffered, (const char *)(res["status"]["category"] | "?"));
+      setLed(res["status"]["level"] | 0);
     }
     buffered = 0;
     return true;
@@ -138,40 +158,49 @@ void setup() {
 
   Wire.begin();  // SDA 21, SCL 22
   sen5x.begin(Wire);
-  uint16_t err = sen5x.deviceReset();
-  if (err) Serial.printf("SEN55 reset error %u\n", err);
-  // Compensate for heat from the enclosure / ESP32 (°C). Tune by comparing with a thermometer.
-  sen5x.setTemperatureOffsetSimple(2.0);
-  err = sen5x.startMeasurement();
-  if (err) Serial.printf("SEN55 start error %u\n", err);
+  if (uint16_t err = sen5x.deviceReset()) Serial.printf("SEN55 reset error %u\n", err);
+  sen5x.setTemperatureOffsetSimple(2.0);  // enclosure heat; tune against a thermometer
+  setPm(true);                            // start with a particle window
+
+  haveIna = ina219.begin();
+  if (!haveIna) Serial.println("INA219 not found: battery data will be omitted");
 
   ensureWifi();
-  Serial.println("Ginhawa node ready. Note: VOC/NOx need a few minutes to warm up after power-on.");
+  Serial.println("Ginhawa station ready. VOC/NOx need a few minutes to warm up after power-on.");
 }
 
 void loop() {
   unsigned long now = millis();
 
+  // Particle window: on for PM_ON_MS at the start of every PM_CYCLE_MS.
+  bool wantPm = (now % PM_CYCLE_MS) < PM_ON_MS;
+  if (wantPm != pmOn) setPm(wantPm);
+
   if (now - lastSample >= 1000) {
     lastSample = now;
     float pm1, pm25, pm4, pm10, rh, temp, voc, nox;
-    uint16_t err = sen5x.readMeasuredValues(pm1, pm25, pm4, pm10, rh, temp, voc, nox);
-    if (!err) {
-      aPm1.add(pm1); aPm25.add(pm25); aPm4.add(pm4); aPm10.add(pm10);
+    if (!sen5x.readMeasuredValues(pm1, pm25, pm4, pm10, rh, temp, voc, nox)) {
+      if (pmOn && now - pmStartedAt >= PM_WARMUP_MS) {  // skip fan spin-up
+        aPm1.add(pm1); aPm25.add(pm25); aPm4.add(pm4); aPm10.add(pm10);
+      }
       aRh.add(rh); aTemp.add(temp); aVoc.add(voc); aNox.add(nox);  // NaN (warming up) is skipped
+    }
+    if (haveIna) {
+      aV.add(ina219.getBusVoltage_V() + ina219.getShuntVoltage_mV() / 1000.0);
+      aA.add(ina219.getCurrent_mA() / 1000.0);
     }
   }
 
   if (now - lastReport >= REPORT_INTERVAL_MS) {
     lastReport = now;
-    if (aPm25.n > 0) {
+    if (aVoc.n > 0 || aPm25.n > 0) {
       if (buffered == MAX_BUFFER) {  // drop the oldest reading
         memmove(buffer, buffer + 1, sizeof(Reading) * (MAX_BUFFER - 1));
         buffered--;
       }
       buffer[buffered++] = {clockSynced() ? time(nullptr) : 0, aPm1.avg(), aPm25.avg(), aPm4.avg(), aPm10.avg(),
-                            aVoc.avg(), aNox.avg(), aTemp.avg(), aRh.avg()};
-      aPm1 = aPm25 = aPm4 = aPm10 = aVoc = aNox = aTemp = aRh = Acc();
+                            aVoc.avg(), aNox.avg(), aTemp.avg(), aRh.avg(), aV.avg(), aA.avg()};
+      aPm1 = aPm25 = aPm4 = aPm10 = aVoc = aNox = aTemp = aRh = aV = aA = Acc();
     }
     upload();
   }

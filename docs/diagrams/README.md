@@ -4,6 +4,7 @@ Editable [draw.io](https://app.diagrams.net) files with PNG exports for the pape
 
 | File | Figure |
 |---|---|
+| `00-agile-scrum-methodology.svg` / `.png` | Agile Scrum methodology (infographic; SVG editable in Figma, Inkscape, draw.io) |
 | `01-system-architecture.drawio` / `.png` | System architecture (deployment view): station, connectivity, Docker server, clients |
 | `02-node-block-diagram.drawio` / `.png` | Monitoring station hardware block diagram (power, data, RF paths) |
 | `03-circuit-schematic.drawio` / `.png` | Circuit schematic with pin numbers, bill of materials and title block |

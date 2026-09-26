@@ -20,7 +20,7 @@ Companion to `03-circuit-schematic.drawio` / `.png` (paste this as a table under
 | PV1 | Solar panel, 20 W, 12 V class | 1 |
 | U1 | Solar charge controller, 12 V 10 A, LiFePO4 profile, common-negative | 1 |
 | F1 | Fuse 5 A + inline holder | 1 |
-| BT1 | LiFePO4 battery, 12.8 V 6 Ah | 1 |
+| BT1 | LiFePO4 battery, 12.8 V 12 Ah | 1 |
 | U2 | DC-DC buck module, 12 V → 5 V, 3 A | 1 |
 | C2 | Electrolytic capacitor, 1000 µF 16 V | 1 |
 | U3 | LilyGO T-SIM7600 (SIM7600G-H) + nano-SIM | 1 |

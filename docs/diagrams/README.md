@@ -10,6 +10,12 @@ background and are sized so text stays about 8 pt or larger when the image is pl
 | `01-system-architecture.drawio` / `.png` | System architecture (deployment view): station, connectivity, Docker server, clients |
 | `02-node-block-diagram.drawio` / `.png` | Monitoring station hardware block diagram (power, data, RF paths) |
 | `03-circuit-schematic.drawio` / `.png` | Circuit schematic with pin numbers and title block |
+| `04-erd` | Entity-relationship diagram (crow's-foot) |
+| `05-use-case` | Use case diagram (human actors only) |
+| `06-context` | Context diagram (Gane–Sarson) |
+| `07-dfd-level1` | Level 1 data flow diagram (Gane–Sarson) |
+| `08-flowchart` | System flowchart (ANSI symbols) |
+| `09-gantt-chart.png` | Project Gantt chart |
 | `03-circuit-notes.md` | Notes and bill of materials for the schematic (paste as a table) |
 
 **Editing:** open a `.drawio` file at app.diagrams.net (File → Open from → Device), in the draw.io

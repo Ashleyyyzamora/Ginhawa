@@ -1,0 +1,73 @@
+# Ginhawa full stack:  docker compose up --build
+# Then open https://localhost  (accept / trust the local certificate).
+# Demo data:           docker compose --profile simulator up --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ginhawa
+      POSTGRES_USER: ginhawa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ginhawa}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ginhawa -d ginhawa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Uncomment to connect with pgAdmin / DBeaver from your laptop:
+    # ports:
+    #   - "5432:5432"
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://ginhawa:${POSTGRES_PASSWORD:-ginhawa}@db:5432/ginhawa
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
+      TZ_NAME: ${TZ_NAME:-Asia/Manila}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./client
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      CADDY_TLS: ${CADDY_TLS:-internal}
+      DEFAULT_SNI: ${DEFAULT_SNI:-localhost}
+    volumes:
+      - caddy_data:/data   # keeps the local CA / certificates across restarts
+      - caddy_config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+
+  simulator:
+    build: ./server
+    profiles: ["simulator"]
+    command: ["node", "scripts/simulate.js"]
+    healthcheck:
+      disable: true
+    environment:
+      API_URL: http://server:4000
+      SIM_DEVICES: ${SIM_DEVICES:-3}
+      SIM_BACKFILL_HOURS: ${SIM_BACKFILL_HOURS:-48}
+      SIM_EMAIL: ${SIM_EMAIL:-demo@ginhawa.local}
+      SIM_PASSWORD: ${SIM_PASSWORD:-ginhawa-demo}
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

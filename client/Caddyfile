@@ -1,0 +1,33 @@
+{
+	# Devices that connect by IP (e.g. an ESP32 using https://192.168.1.20) send no SNI;
+	# serve them the certificate for this name.
+	default_sni {$DEFAULT_SNI:localhost}
+}
+
+# SITE_ADDRESS: "localhost", a LAN IP ("192.168.1.20"), several ("localhost, 192.168.1.20"),
+# or a real domain ("ginhawa.example.com").
+# CADDY_TLS: "internal" = Caddy's own local CA (development / LAN demo);
+#            an email address = free Let's Encrypt certificate for a real domain.
+{$SITE_ADDRESS:localhost} {
+	tls {$CADDY_TLS:internal}
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy server:4000
+	}
+	handle /ws {
+		reverse_proxy server:4000
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

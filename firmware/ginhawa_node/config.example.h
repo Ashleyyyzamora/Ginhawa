@@ -19,7 +19,10 @@
 // How often to average and upload a reading (ms). The SEN55 measures every second.
 #define REPORT_INTERVAL_MS  10000
 
-// Optional status LED pins (-1 to disable). Green = good, yellow-ish = moderate, red = unhealthy.
-#define LED_RED_PIN    25
-#define LED_GREEN_PIN  26
+// Optional status LED pins (-1 to disable). Green = good, both = moderate, red = unhealthy.
+// On the LilyGO T-SIM7600 these pins are wired on the board and must NOT be used:
+//   IO4 (PWRKEY), IO12 (LED), IO25-27 (modem), IO32-36 (modem/ADC), IO2/13/14/15 (microSD).
+// Free header pins: IO5, IO18, IO19, IO21/22 (I2C, used by the SEN55), IO23.
+#define LED_RED_PIN    18
+#define LED_GREEN_PIN  19
 #define BUZZER_PIN     -1

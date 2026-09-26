@@ -8,7 +8,7 @@
  *   pin 1 VDD -> 5V (VIN)     pin 2 GND -> GND
  *   pin 3 SDA -> GPIO 21      pin 4 SCL -> GPIO 22
  *   pin 5 SEL -> GND (selects I2C)   pin 6 NC
- *   (the SEN55 has no pull-ups: add 10k from SDA and SCL to 3.3V if your board lacks them)
+ *   add 4.7 kΩ pull-ups from SDA and SCL to 3.3 V (see docs/diagrams/03-circuit-schematic)
  *
  * Libraries (Arduino Library Manager):
  *   - "Sensirion I2C SEN5X" (and its dependency "Sensirion Core")

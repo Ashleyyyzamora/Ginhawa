@@ -143,8 +143,10 @@ pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow
 
 /* ---------- Shell ---------- */
 .shell { min-height: 100dvh; }
+/* The app keeps its phone layout on every screen: a centered column the width of a large phone. */
+:root { --app-w: 480px; }
 .content {
-  max-width: 720px; margin: 0 auto;
+  max-width: var(--app-w); margin: 0 auto;
   padding: 0 16px calc(104px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; gap: 16px;
 }
@@ -180,7 +182,7 @@ pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow
 
 /* Tab bar */
 .tabbar {
-  position: fixed; inset: auto 0 0 0; z-index: 30;
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, var(--app-w)); z-index: 30;
   display: grid;
   background: color-mix(in srgb, var(--surface) 86%, transparent);
   backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px);
@@ -244,7 +246,6 @@ pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow
 
 /* ---------- Home: search & sort ---------- */
 .toolbar { display: flex; flex-direction: column; gap: 10px; }
-@media (min-width: 560px) { .toolbar { flex-direction: row; align-items: center; } .toolbar .search { flex: 1; } }
 .search {
   display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 12px;
   background: var(--surface-3); color: var(--text-secondary);
@@ -348,7 +349,6 @@ pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow
 
 /* Reading tiles (Apple Weather widgets) */
 .tile-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-@media (min-width: 560px) { .tile-grid { grid-template-columns: repeat(4, 1fr); } }
 .tile {
   background: var(--surface); border: 0; border-radius: 18px; padding: 14px; box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 4px; text-align: left; font: inherit; color: inherit; min-height: 128px;
@@ -549,24 +549,6 @@ details > * + * { margin-top: 8px; }
 .setup-block { display: flex; flex-direction: column; gap: 8px; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .setup-hint { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--brand); }
-
-/* ---------- Wide screens: sidebar navigation, two-column station list ---------- */
-.brand, .brand-foot { display: none; }
-@media (min-width: 900px) {
-  .shell { padding-left: 240px; }
-  .tabbar {
-    inset: 0 auto 0 0; width: 240px; display: flex !important; flex-direction: column; gap: 4px;
-    padding: 20px 14px; border-top: 0; border-right: 1px solid var(--border);
-  }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.2rem; letter-spacing: -0.01em; padding: 4px 10px 18px; }
-  .brand img { border-radius: 9px; }
-  .tab { flex-direction: row; gap: 12px; padding: 11px 12px; font-size: 0.95rem; }
-  .tab:hover { background: var(--surface-2); color: var(--text); }
-  .tab.active { background: color-mix(in srgb, var(--brand) 12%, transparent); }
-  .tab-badge { top: -8px; right: -12px; }
-  .brand-foot { display: block; margin-top: auto; padding: 0 10px; font-size: 0.78rem; color: var(--text-secondary); }
-  .content { max-width: 920px; padding: 8px 32px 48px; }
-  .navbar { margin: 0 -32px -16px; padding-left: 28px; padding-right: 28px; }
-  .device-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .station-card { height: 100%; }
+@media (min-width: 520px) {
+  .tabbar { border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-radius: 18px 18px 0 0; }
 }

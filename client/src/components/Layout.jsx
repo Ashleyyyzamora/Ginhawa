@@ -55,10 +55,6 @@ export default function Layout() {
         <Outlet />
       </main>
       <nav className="tabbar" aria-label="Main" style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
-        <div className="brand" aria-hidden="true">
-          <img src="/icon.svg" alt="" width="32" height="32" />
-          <span>Ginhawa</span>
-        </div>
         {tabs.map((t) => (
           <NavLink key={t.to} to={t.to} end={t.end} className="tab">
             <span className="tab-icon">
@@ -68,7 +64,6 @@ export default function Layout() {
             <span>{t.label}</span>
           </NavLink>
         ))}
-        <p className="brand-foot">Signed in as {user.name}{user.role === 'dev' ? ' · Developer' : ''}</p>
       </nav>
     </div>
   );

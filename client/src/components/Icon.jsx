@@ -28,6 +28,7 @@ const PATHS = {
   thermo: 'M14 14.8V5a2 2 0 10-4 0v9.8a4 4 0 104 0z',
   drop: 'M12 3s6 6.5 6 11a6 6 0 01-12 0c0-4.5 6-11 6-11z',
   clock: 'M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2',
+  battery: 'M3 7h15v10H3zM21 10v4M6 10v4M9 10v4',
 };
 
 export default function Icon({ name, size = 22, ...props }) {

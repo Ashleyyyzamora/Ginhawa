@@ -18,7 +18,15 @@ const readingSchema = z
     nox_index: num(0, 500),
     temperature: num(-40, 85),
     humidity: num(0, 100),
+    // Power monitor (INA219): pack voltage and current (+ charging / − discharging).
+    battery_voltage: num(0, 30),
+    battery_current: num(-20, 20),
+    network: z.enum(['wifi', 'lte']).nullish(),
+    // GPS fix from the station's modem, when available.
+    latitude: num(-90, 90),
+    longitude: num(-180, 180),
   })
+  .refine((r) => (r.latitude == null) === (r.longitude == null), { message: 'latitude and longitude must be sent together' })
   .transform((r) => {
     const now = Date.now();
     let ts = r.recorded_at ? Date.parse(r.recorded_at) : now;
@@ -44,6 +52,15 @@ export default function ingestRouter(realtime) {
     const { count, latest } = await ingestReadings(req.device, readings, realtime);
     // The compact status lets the device drive a local LED / buzzer.
     res.status(201).json({ accepted: count, status: { aqi: latest.aqi, level: latest.level, category: latest.category } });
+  });
+
+  /**
+   * GET /api/v1/ingest/ping
+   * Checks a device key and the connection without storing anything (used by the app's
+   * "Test connection" button and handy when setting up a new sensor).
+   */
+  router.get('/ping', requireDevice, (req, res) => {
+    res.json({ ok: true, device: { id: req.device.id, name: req.device.name, landmark: req.device.landmark } });
   });
 
   return router;

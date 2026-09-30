@@ -68,6 +68,18 @@ services:
       server:
         condition: service_healthy
 
+  # Optional: a free temporary public HTTPS address (https://<random>.trycloudflare.com) so phones
+  # on mobile data, and sensors on Wi-Fi or LTE, can reach this computer. The address changes on
+  # every start; find it with:  docker compose logs tunnel
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: >-
+      tunnel --no-autoupdate --url https://web:443 --no-tls-verify
+      --http-host-header localhost --origin-server-name localhost
+    depends_on:
+      - web
+
 volumes:
   pgdata:
   caddy_data:

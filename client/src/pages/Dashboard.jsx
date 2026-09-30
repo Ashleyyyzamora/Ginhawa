@@ -35,14 +35,22 @@ function Overview({ devices, now }) {
   const worst = [...withData].sort(sorters.worst)[0];
   const level = worst?.latest.level ?? null;
   const alerts = devices.reduce((n, d) => n + d.open_alerts, 0);
+  const anyReported = devices.some((d) => d.last_seen_at);
+  const title = level != null ? levelInfo(level).label : anyReported ? 'No live readings' : 'No readings yet';
+  const advice =
+    level != null
+      ? levelInfo(level).advice
+      : anyReported
+        ? 'No station is reporting right now. Check their power and connection.'
+        : 'Live air quality appears here once a station\'s sensor sends its first reading.';
 
   return (
     <section className={`card overview lvl-${level ?? 'none'}`} aria-label="Overview">
       <div className="overview-top">
         <div>
           <p className="overview-eyebrow">{withData.length > 1 ? 'Worst air right now' : 'Air right now'}</p>
-          <h2 className="overview-title">{level == null ? 'Waiting for live data' : levelInfo(level).label}</h2>
-          <p className="muted small">{levelInfo(level).advice}</p>
+          <h2 className="overview-title">{title}</h2>
+          <p className="muted small">{advice}</p>
         </div>
         <span className="overview-swatch" aria-hidden="true" />
       </div>
@@ -159,6 +167,7 @@ export default function Dashboard() {
                 const online = isOnline(d, now);
                 const level = d.latest?.level;
                 const info = levelInfo(level);
+                const fresh = !d.last_seen_at; // added, but its sensor has never reported
                 return (
                   <li key={d.id}>
                     <Link to={`/devices/${d.id}`} className={`station-card lvl-${level ?? 'none'}`}>
@@ -174,15 +183,27 @@ export default function Dashboard() {
                           </div>
                           {d.landmark && <div className="station-card-sub truncate">{d.landmark}</div>}
                           <div className="station-card-status">
-                            <span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Live' : 'Offline'} · {timeAgo(d.last_seen_at, now)}
+                            {fresh ? (
+                              <><span className="status-dot off" /> Sensor not connected yet</>
+                            ) : (
+                              <><span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Live' : 'Offline'} · {timeAgo(d.last_seen_at, now)}</>
+                            )}
                           </div>
                         </div>
-                        <div className="station-card-aqi">
-                          <span className="station-card-num">{d.latest?.aqi ?? '—'}</span>
-                          <span className="station-card-unit">AQI</span>
-                        </div>
+                        {!fresh && (
+                          <div className="station-card-aqi">
+                            <span className="station-card-num">{d.latest?.aqi ?? '—'}</span>
+                            <span className="station-card-unit">AQI</span>
+                          </div>
+                        )}
                       </div>
                       <div className="station-card-bottom">
+                        {fresh ? (
+                          <span className="setup-hint">
+                            <Icon name="chip" size={16} /> {isDev ? 'Tap to connect its sensor' : 'Readings will appear once it reports'}
+                          </span>
+                        ) : (
+                        <>
                         <span className="level-pill">
                           <span className="swatch" aria-hidden="true" /> {info.short ?? info.label}
                         </span>
@@ -190,6 +211,8 @@ export default function Dashboard() {
                           PM2.5 <b>{fmtMetric('pm25', d.latest?.pm25)}</b> · VOC <b>{fmtMetric('voc_index', d.latest?.voc_index)}</b> · NOx{' '}
                           <b>{fmtMetric('nox_index', d.latest?.nox_index)}</b>
                         </span>
+                        </>
+                        )}
                       </div>
                     </Link>
                   </li>

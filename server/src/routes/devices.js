@@ -4,7 +4,7 @@ import { query } from '../db.js';
 import { config } from '../config.js';
 import { requireUser, requireDev, generateDeviceKey, hashDeviceKey } from '../auth.js';
 import { HttpError, isUuid } from '../http.js';
-import { METRICS, withSummary } from '../readings.js';
+import { METRICS, withCarriedPm, withSummary } from '../readings.js';
 
 const BUCKETS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '6h': 21600, '1d': 86400 };
 const MAX_POINTS = 500;
@@ -22,8 +22,12 @@ const updateSchema = z
     pm25_threshold: z.number().positive().max(1000),
     voc_threshold: z.number().positive().max(500),
     nox_threshold: z.number().positive().max(500),
+    // Manual location, for stations that cannot get a GPS fix (e.g. under a roof).
+    latitude: z.number().min(-90).max(90).nullable(),
+    longitude: z.number().min(-180).max(180).nullable(),
   })
-  .partial();
+  .partial()
+  .refine((b) => ('latitude' in b) === ('longitude' in b), { message: 'latitude and longitude must be sent together' });
 
 const rangeSchema = z.object({
   from: z.iso.datetime({ offset: true }).optional(),
@@ -33,12 +37,12 @@ const rangeSchema = z.object({
 
 /** Public shape of a device (never includes the key hash). */
 function serializeDevice(row, user) {
-  const { api_key_hash, owner_id, latest, open_alerts, ...device } = row;
+  const { api_key_hash, owner_id, latest, latest_pm, open_alerts, ...device } = row;
   const lastSeen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0;
   return {
     ...device,
     online: Date.now() - lastSeen < config.offlineAfterSeconds * 1000,
-    latest: withSummary(latest ?? null),
+    latest: withSummary(withCarriedPm(latest ?? null, latest_pm)),
     open_alerts: open_alerts ?? 0,
     // Stations are visible to everyone; only developers may change them.
     can_manage: user.isDev,
@@ -49,6 +53,8 @@ const DEVICE_SELECT = `
   SELECT d.*,
     (SELECT to_jsonb(r) FROM readings r WHERE r.device_id = d.id
       ORDER BY r.recorded_at DESC LIMIT 1) AS latest,
+    (SELECT to_jsonb(p) FROM (SELECT pm1, pm25, pm4, pm10, recorded_at FROM readings r
+      WHERE r.device_id = d.id AND r.pm25 IS NOT NULL ORDER BY r.recorded_at DESC LIMIT 1) p) AS latest_pm,
     (SELECT count(*)::int FROM alerts a WHERE a.device_id = d.id AND a.resolved_at IS NULL) AS open_alerts,
     u.name AS created_by
   FROM devices d JOIN users u ON u.id = d.owner_id`;
@@ -125,7 +131,8 @@ export default function devicesRouter(realtime) {
     if (body.landmark === '') body.landmark = null;
     const keys = Object.keys(body);
     if (keys.length) {
-      const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
+      let sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
+      if ('latitude' in body) sets += `, location_updated_at = ${body.latitude == null ? 'NULL' : 'now()'}`;
       await query(`UPDATE devices SET ${sets} WHERE id = $1`, [device.id, ...keys.map((k) => body[k] ?? null)]).catch(
         (err) => {
           throw duplicateStation(err);
@@ -163,7 +170,7 @@ export default function devicesRouter(realtime) {
     let rows;
     if (seconds == null) {
       ({ rows } = await query(
-        `SELECT recorded_at AS t, ${METRICS.join(', ')} FROM readings
+        `SELECT recorded_at AS t, network, ${METRICS.join(', ')} FROM readings
          WHERE device_id = $1 AND recorded_at >= $2 AND recorded_at < $3
          ORDER BY recorded_at LIMIT 5000`,
         [device.id, fromDate, toDate],

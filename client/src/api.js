@@ -61,4 +61,19 @@ export const api = {
 
   alerts: (params = {}) => request(`/alerts?${new URLSearchParams(params)}`),
   ackAlert: (id) => request(`/alerts/${id}/ack`, { method: 'POST' }),
+
+  // Sensor-side calls, authenticated with the station's key (used to test a new sensor setup).
+  pingSensor: (key) => deviceRequest('/ingest/ping', key),
+  sendSampleReading: (key, body) => deviceRequest('/ingest', key, { method: 'POST', body }),
 };
+
+async function deviceRequest(path, key, { method = 'GET', body } = {}) {
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+    method,
+    headers: { 'x-device-key': key, ...(body && { 'content-type': 'application/json' }) },
+    body: body && JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText, data.issues);
+  return data;
+}

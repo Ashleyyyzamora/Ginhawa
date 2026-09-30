@@ -1,4 +1,5 @@
-export const OFFLINE_AFTER_MS = 120 * 1000;
+// Stations upload once a minute; after 5 minutes of silence a station is shown as offline.
+export const OFFLINE_AFTER_MS = 5 * 60 * 1000;
 
 export const LEVELS = [
   { label: 'Good', advice: 'Air quality is satisfactory. Enjoy the space.' },
@@ -163,3 +164,19 @@ export const HEALTH_TIPS = [
 
 /** Where a value sits on a metric's scale (0..1) for the small gauges on reading tiles. */
 export const GAUGE_MAX = { pm1: 150, pm25: 150, pm4: 200, pm10: 250, voc_index: 500, nox_index: 500, temperature: 45, humidity: 100 };
+
+// Approximate state of charge of a 1-cell Li-ion pack (18650 cells in parallel) from its voltage.
+// Voltage reads a little high while charging and low under load, so this is a guide, not a gauge.
+const LI_ION_CURVE = [[3.3, 0], [3.45, 5], [3.6, 15], [3.7, 30], [3.75, 40], [3.8, 50], [3.87, 60], [3.95, 70], [4.02, 80], [4.1, 90], [4.2, 100]];
+export function batteryPercent(volts) {
+  if (volts == null) return null;
+  if (volts <= LI_ION_CURVE[0][0]) return 0;
+  for (let i = 1; i < LI_ION_CURVE.length; i++) {
+    const [v1, p1] = LI_ION_CURVE[i];
+    if (volts <= v1) {
+      const [v0, p0] = LI_ION_CURVE[i - 1];
+      return Math.round(p0 + ((volts - v0) / (v1 - v0)) * (p1 - p0));
+    }
+  }
+  return 100;
+}

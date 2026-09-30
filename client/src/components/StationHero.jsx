@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import AqiScale from './AqiScale.jsx';
 import Icon from './Icon.jsx';
-import { HEALTH_TIPS, METRICS, fmtMetric, fmtTime, levelInfo, mainPollutant, pm25Level, pm25ToAqi, timeAgo } from '../format.js';
+import { HEALTH_TIPS, METRICS, batteryPercent, fmtMetric, fmtTime, levelInfo, mainPollutant, pm25Level, pm25ToAqi, timeAgo } from '../format.js';
 
 /** IQAir-style hero: the whole card takes the colour of the current air-quality level. */
 export function StationHero({ reading, online, lastSeen, now }) {
@@ -75,13 +75,68 @@ export function HourlyStrip({ points }) {
           const last = i === points.length - 1;
           return (
             <li key={p.t} className={`lvl-${pm25Level(p.pm25) ?? 'none'}`}>
-              <span className="hourly-time">{last ? 'Now' : fmtTime(p.t).replace(':00', '')}</span>
+              <span className="hourly-time">{last ? 'This hr' : fmtTime(p.t).replace(':00', '')}</span>
               <span className="hourly-badge">{aqi ?? '—'}</span>
               <span className="hourly-pm">{p.pm25 == null ? '—' : p.pm25.toFixed(0)}<small> µg</small></span>
             </li>
           );
         })}
       </ol>
+    </section>
+  );
+}
+
+/** Station health: battery, connection, location and when particles were last measured. */
+export function StationStatus({ device, now }) {
+  const r = device.latest;
+  const pct = batteryPercent(r?.battery_voltage);
+  const cur = r?.battery_current;
+  const charging = cur != null && cur > 0.02;
+  const hasFix = device.latitude != null && device.longitude != null;
+  const items = [
+    {
+      icon: 'battery',
+      label: 'Battery',
+      value: pct == null ? '—' : `≈${pct}%`,
+      sub: r?.battery_voltage == null ? 'No power data yet' : `${r.battery_voltage.toFixed(2)} V · ${charging ? 'charging' : 'on battery'}`,
+      warn: pct != null && pct <= 20,
+    },
+    {
+      icon: 'wifi',
+      label: 'Connection',
+      value: r?.network === 'lte' ? '4G LTE' : r?.network === 'wifi' ? 'Wi-Fi' : '—',
+      sub: `Last upload ${timeAgo(device.last_seen_at, now)}`,
+    },
+    {
+      icon: 'pin',
+      label: 'Location',
+      value: hasFix ? `${device.latitude.toFixed(4)}, ${device.longitude.toFixed(4)}` : 'No fix yet',
+      sub: hasFix ? `Updated ${timeAgo(device.location_updated_at, now)}` : 'Set by the station\'s GPS',
+    },
+    {
+      icon: 'clock',
+      label: 'Particles measured',
+      value: r?.pm_recorded_at ? timeAgo(r.pm_recorded_at, now) : '—',
+      sub: 'Every 5 minutes',
+    },
+  ];
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Station status</h2>
+      </div>
+      <div className="status-grid">
+        {items.map((it) => (
+          <div key={it.label} className={`status-item ${it.warn ? 'status-warn' : ''}`}>
+            <span className="status-icon"><Icon name={it.icon} size={18} /></span>
+            <div className="status-text">
+              <span className="status-label">{it.label}</span>
+              <strong className="truncate">{it.value}</strong>
+              <span className="status-sub">{it.sub}</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

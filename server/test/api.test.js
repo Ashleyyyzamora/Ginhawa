@@ -109,6 +109,11 @@ test('full flow: register, add device, ingest, live updates, alerts, history', o
 
   assert.equal((await api('/ingest', { method: 'POST', body: { pm25: 5 } })).status, 401);
   assert.equal((await api('/ingest', { method: 'POST', deviceKey: apiKey, body: { pm25: -1 } })).status, 400);
+  // Key check without storing anything
+  assert.equal((await api('/ingest/ping', { deviceKey: 'gnh_wrong' })).status, 401);
+  const ping = await api('/ingest/ping', { deviceKey: apiKey });
+  assert.equal(ping.status, 200);
+  assert.equal(ping.body.device.id, device.id);
 
   const liveReading = nextMessage(ws, 'reading');
   const liveAlert = nextMessage(ws, 'alert');
@@ -228,4 +233,56 @@ test('buffered batch opens and resolves alerts at the readings\' own times', opt
   assert.equal(alerts[0].peak_value, 80);
   assert.equal(alerts[1].resolved_at, null);
   assert.equal(alerts[1].peak_value, 60);
+});
+
+test('duty-cycled PM is carried forward; battery, network and GPS are stored', opts, async () => {
+  // dev2@example.com is a developer (see DEV_EMAILS above); reuse it to add a station.
+  const login = await api('/auth/login', { method: 'POST', body: { email: 'dev2@example.com', password: 'password123' } });
+  const token = login.body.token;
+  const { body: created } = await api('/devices', { method: 'POST', token, body: { name: 'Telemetry' } });
+  const key = created.apiKey;
+  const id = created.device.id;
+  const t0 = Date.now() - 20 * 60e3;
+  const at = (min, extra) => ({ recorded_at: new Date(t0 + min * 60e3).toISOString(), voc_index: 100, nox_index: 1, ...extra });
+
+  // PM measured at minute 0, then gas-only readings (no PM) for the next minutes.
+  await api('/ingest', {
+    method: 'POST',
+    deviceKey: key,
+    body: {
+      readings: [
+        at(0, { pm1: 20, pm25: 40, pm4: 44, pm10: 50, battery_voltage: 3.31, battery_current: -0.12, network: 'wifi' }),
+        at(1, { battery_voltage: 3.3, battery_current: 0.8, network: 'lte', latitude: 8.4822, longitude: 124.6472 }),
+      ],
+    },
+  });
+  let { body } = await api(`/devices/${id}`, { token });
+  let latest = body.device.latest;
+  assert.equal(latest.pm25, 40, 'PM carried forward from minute 0');
+  assert.equal(latest.aqi, 112);
+  assert.equal(new Date(latest.pm_recorded_at).getTime(), t0);
+  assert.equal(latest.battery_voltage, 3.3);
+  assert.equal(latest.network, 'lte');
+  assert.equal(body.device.latitude, 8.4822);
+  assert.ok(body.device.location_updated_at);
+  assert.equal(body.device.online, true);
+
+  // 12 minutes later without a PM measurement: too old to carry, so AQI is unknown.
+  await api('/ingest', { method: 'POST', deviceKey: key, body: at(12, {}) });
+  ({ body } = await api(`/devices/${id}`, { token }));
+  latest = body.device.latest;
+  assert.equal(latest.pm25, null);
+  assert.equal(latest.aqi, null);
+  assert.equal(latest.level, 0, 'level still reported from VOC/NOx');
+
+  // History keeps PM gaps as gaps (averages ignore missing values).
+  const raw = await api(`/devices/${id}/readings?bucket=raw&from=${new Date(t0 - 1000).toISOString()}`, { token });
+  assert.deepEqual(raw.body.points.map((p) => p.pm25), [40, null, null]);
+  const agg = await api(`/devices/${id}/readings?bucket=1h&from=${new Date(t0 - 3600e3).toISOString()}`, { token });
+  assert.equal(agg.body.points.find((p) => p.pm25 != null).pm25, 40);
+
+  // Manual location override by a developer.
+  const patched = await api(`/devices/${id}`, { method: 'PATCH', token, body: { latitude: 8.48, longitude: 124.65 } });
+  assert.equal(patched.body.device.longitude, 124.65);
+  assert.equal((await api(`/devices/${id}`, { method: 'PATCH', token, body: { latitude: 8.48 } })).status, 400);
 });

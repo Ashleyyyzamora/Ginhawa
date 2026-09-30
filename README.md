@@ -30,7 +30,7 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
   alerts and download data, but can't change stations.
 - **Overview**: the worst air right now, stations online, active alerts and the worst station at a glance
 - **Search & sort** stations by barangay/landmark; sort by worst air, A–Z or most recently updated
-- **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating every few seconds over WebSocket
+- **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating live over WebSocket as each station reports (once a minute)
 - **Station detail**: health advice, AQI color scale, all 8 measurements (tap one for a plain-language
   explanation and its levels), history charts (1 h / 24 h / 7 d / 30 d)
 - **Pull-to-refresh**, in-app notifications when a new alert starts, and in-app confirm dialogs
@@ -101,6 +101,47 @@ the simulator, because it needs to add its placeholder stations. Leave out
 > To avoid the certificate warning, install Caddy's root CA on the phone. It is inside the
 > `caddy_data` volume: `docker compose cp web:/data/caddy/pki/authorities/local/root.crt .`
 
+### Remove a station
+
+Signed in as a developer: open the station → ⚙ → **Delete station**. It removes the station with all of
+its readings and alerts, for everyone. Without a developer account, from the project folder:
+
+```bash
+docker compose exec db psql -U ginhawa -d ginhawa -c "DELETE FROM devices WHERE name = 'Camaman-an';"
+```
+
+### Test it as a real app on your phone
+
+The app is a Progressive Web App: installed from the browser it gets its own icon and opens full screen
+like a native app. Phones only allow installing from a **trusted** HTTPS address, so the easiest way to
+test is the free temporary tunnel:
+
+```bash
+docker compose --profile tunnel up -d
+docker compose logs tunnel        # look for https://<random-words>.trycloudflare.com
+```
+
+Open that address on the phone (Wi-Fi or mobile data), sign in, then **Chrome menu → Add to Home screen /
+Install app** (Android) or **Share → Add to Home Screen** (iPhone, Safari). The address changes each time
+the tunnel restarts, and the app only works while this computer is on. For something permanent, deploy it
+online (below).
+
+### Connecting the real sensor
+
+1. Make the server reachable by the sensor: same Wi-Fi as this computer (see *Open it on your phone*, use
+   the computer's IP), the tunnel address above, or your online domain. LTE needs a public address.
+2. In the app, open the station (or **Add station**) → **Generate sensor key**. The app shows the key, a
+   ready-to-paste `config.h`, and two buttons to test the key from the browser before you touch the
+   hardware: **Test connection** (checks the key only) and **Send a sample reading**.
+3. Copy `firmware/ginhawa_node/config.example.h` to `config.h`, paste the values (plus your SIM's APN),
+   and upload the sketch with the Arduino IDE (board: *ESP32 Dev Module*). Wiring is in
+   `docs/diagrams/03-circuit-schematic.png`.
+4. Open the Serial Monitor (115200 baud): you should see `Uploaded 1 reading(s) over Wi-Fi`. The
+   station turns **Live** in the app within a minute.
+
+A device can also check its key and connection without storing anything with
+`GET /api/v1/ingest/ping` (header `X-Device-Key`).
+
 ### Deploying online
 
 On a cloud VM with a domain pointing at it, set `SITE_ADDRESS=ginhawa.yourdomain.com` and
@@ -141,23 +182,40 @@ To serve HTTPS straight from Node (no Caddy), set `TLS_KEY_FILE` and `TLS_CERT_F
 
 ## Hardware
 
-### Recommended (simplest wiring): ESP32 + Sensirion SEN55
+### Compact solar station (the design in the proposal)
 
-One module gives every value the app shows. The sketch is in `firmware/ginhawa_node/`.
+One compact unit (≈150 × 110 × 260 mm, ≈0.8 kg) plus a small solar panel, built around a standard
+**ESP32 DevKit V1**. Full wiring: `docs/diagrams/03-circuit-schematic.png`; parts list:
+`docs/diagrams/03-circuit-notes.md`.
 
 | Part | Approx. price | Notes |
 |---|---|---|
-| ESP32 DevKit v1 | ₱350 | Wi-Fi, HTTPS capable |
+| ESP32 DevKit V1 (ESP32-WROOM-32) | already owned | MCU + Wi-Fi |
 | Sensirion **SEN55** | ₱2,000–2,800 | PM1/2.5/4/10 + VOC + NOx + T/RH over I2C |
-| JST GHR-06V cable, 2× 10 kΩ resistors | ₱150 | I2C pull-ups |
-| 18650 cell + TP4056 charger + 5 V boost | ₱300 | makes it portable |
-| RGB LED / buzzer (optional) | ₱50 | local "air is bad" indicator |
+| SIMCom **A7670** 4G LTE Cat-1 breakout + LTE antenna | ₱1,350–2,100 | fallback when there is no Wi-Fi |
+| GPS module ATGM336H + AO3401 switch | ₱250–450 | position every 15 min |
+| INA219 module | ₱150–250 | battery voltage and current |
+| 3× 18650 Li-ion 3000 mAh + 1S BMS + holder | ₱850–1,450 | 3.7 V 9 Ah (≈33 Wh) pack, ≈0.15 kg |
+| CN3791 solar charger + 6 V 6 W panel | ₱500–1,000 | recharges the pack |
+| 3.3 V buck-boost + 5 V boost (MT3608) + 1000 µF | ₱200–470 | ESP32/GPS and SEN55 supplies |
+| IP65 box 150×100×70 mm + 3D-printed radiation shield | ₱550–1,350 | enclosure |
+
+**Power-saving schedule** (≈7.5 Wh/day on Wi-Fi, ≈11.6 Wh/day on LTE; ≈3.5 / 2.3 days without sun):
+VOC, NOx, temperature and humidity are sampled every second; the SEN55 fan and laser run **1 minute
+in every 5** for particles; the station averages and uploads **once a minute**. The GPS is powered for
+up to 90 s every 15 minutes, and the LTE modem is started only when Wi-Fi is unavailable. The server
+carries the latest particle reading forward for up to 10 minutes so the AQI stays continuous, and marks
+a station offline after 5 minutes of silence.
 
 Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 
 1. In the app, signed in as a developer: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
-2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL and key.
-3. Install the libraries *Sensirion I2C SEN5X* and *ArduinoJson* and upload to the ESP32.
+2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL, key and the SIM's APN.
+3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219*, *ArduinoJson* and *TinyGPSPlus*,
+   select the board **ESP32 Dev Module** and upload.
+
+The LTE upload uses the A7670's built-in HTTP(S) AT commands (`lte.h`); test it on the bench with the
+exact breakout you buy. LTE needs the server on a public address (domain or VPS).
 
 ### Budget alternative
 
@@ -192,7 +250,7 @@ limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_ma
 |---|---|---|
 | GET | `/devices` | all stations, each with `latest` reading (incl. `aqi`, `level`, `category`), `online`, `open_alerts`, `created_by`, `can_manage` |
 | POST | `/devices` | `{name, landmark?}`, e.g. `{"name":"Barangay Carmen","landmark":"Near the public market"}` → `{device, apiKey}` (**key shown once**). `409` if the same name + landmark exists |
-| GET / PATCH / DELETE | `/devices/:id` | PATCH accepts `name`, `landmark`, `pm25_threshold`, `voc_threshold`, `nox_threshold` |
+| GET / PATCH / DELETE | `/devices/:id` | PATCH accepts `name`, `landmark`, `pm25_threshold`, `voc_threshold`, `nox_threshold`, and `latitude` + `longitude` (manual location) |
 | POST | `/devices/:id/rotate-key` | new `apiKey`; the old one stops working |
 | GET | `/devices/:id/readings?from&to&bucket` | time series; `bucket` = `auto` (default) \| `raw` \| `1m` `5m` `15m` `1h` `6h` `1d`; default last 24 h |
 | GET | `/devices/:id/hourly-profile?days=7` | average PM2.5 / VOC / NOx per hour of day |
@@ -205,14 +263,21 @@ limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_ma
 | POST | `/alerts/:id/ack` | mark as acknowledged (any signed-in user) |
 
 ### Ingest (used by the sensor node)
+`GET /ingest/ping` with header `X-Device-Key: gnh_…` checks the key and returns the station, storing nothing.
+
 `POST /ingest` with header `X-Device-Key: gnh_…`
 
 ```json
 { "pm1": 10.2, "pm25": 15.1, "pm4": 17.0, "pm10": 19.8,
   "voc_index": 120, "nox_index": 4, "temperature": 30.5, "humidity": 68,
+  "battery_voltage": 3.31, "battery_current": -0.12, "network": "wifi",
+  "latitude": 8.4822, "longitude": 124.6472,
   "recorded_at": "2026-09-26T06:00:00Z" }
 ```
-All fields are optional. `recorded_at` defaults to the server time. Send `{"readings": [ … up to 500 … ]}`
+All fields are optional. Leave the PM fields out when particles weren't measured (4 of every 5
+uploads); the server then reports the last particle reading (up to 10 minutes old) with its
+`pm_recorded_at`. `battery_current` is positive while charging. `latitude`/`longitude` must be
+sent together and update the station's map location. `recorded_at` defaults to the server time. Send `{"readings": [ … up to 500 … ]}`
 to upload a buffered batch. The response `{"accepted": 1, "status": {"aqi": 57, "level": 1, "category": "Moderate"}}`
 lets the device drive a status LED.
 

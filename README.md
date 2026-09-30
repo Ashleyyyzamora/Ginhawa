@@ -143,32 +143,38 @@ To serve HTTPS straight from Node (no Caddy), set `TLS_KEY_FILE` and `TLS_CERT_F
 
 ### Compact solar station (the design in the proposal)
 
-One compact unit (≈200 × 120 × 265 mm, ≈1.3 kg) plus a small solar panel. Full wiring:
-`docs/diagrams/03-circuit-schematic.png`; parts list: `docs/diagrams/03-circuit-notes.md`.
+One compact unit (≈150 × 110 × 260 mm, ≈0.8 kg) plus a small solar panel, built around a standard
+**ESP32 DevKit V1**. Full wiring: `docs/diagrams/03-circuit-schematic.png`; parts list:
+`docs/diagrams/03-circuit-notes.md`.
 
 | Part | Approx. price | Notes |
 |---|---|---|
-| LilyGO **T-SIM7600G-H** | ₱2,600–3,500 | ESP32 + 4G LTE + GPS modem |
+| ESP32 DevKit V1 (ESP32-WROOM-32) | already owned | MCU + Wi-Fi |
 | Sensirion **SEN55** | ₱2,000–2,800 | PM1/2.5/4/10 + VOC + NOx + T/RH over I2C |
+| SIMCom **A7670** 4G LTE Cat-1 breakout + LTE antenna | ₱1,350–2,100 | fallback when there is no Wi-Fi |
+| GPS module ATGM336H + AO3401 switch | ₱250–450 | position every 15 min |
 | INA219 module | ₱150–250 | battery voltage and current |
-| 4× LiFePO4 32700 6 Ah + 1S BMS | ₱1,150–1,900 | 3.2 V 24 Ah (≈77 Wh) pack, ≈0.6 kg |
-| 1S LiFePO4 solar charger + 6 V 10 W panel | ₱650–1,300 | recharges the pack |
-| 3.2 → 5 V 3 A boost + 1000 µF capacitor | ₱150–300 | powers board and sensor |
-| IP65 box 200×120×75 mm + 3D-printed radiation shield | ₱650–1,500 | enclosure |
+| 3× 18650 Li-ion 3000 mAh + 1S BMS + holder | ₱850–1,450 | 3.7 V 9 Ah (≈33 Wh) pack, ≈0.15 kg |
+| CN3791 solar charger + 6 V 6 W panel | ₱500–1,000 | recharges the pack |
+| 3.3 V buck-boost + 5 V boost (MT3608) + 1000 µF | ₱200–470 | ESP32/GPS and SEN55 supplies |
+| IP65 box 150×100×70 mm + 3D-printed radiation shield | ₱550–1,350 | enclosure |
 
-**Power-saving schedule** (≈14 Wh/day, ≈4 days without sun): VOC, NOx, temperature and humidity are
-sampled every second; the SEN55 fan and laser run **1 minute in every 5** for particles; the station
-averages and uploads **once a minute**. The server carries the latest particle reading forward for up
-to 10 minutes so the AQI stays continuous, and marks a station offline after 5 minutes of silence.
+**Power-saving schedule** (≈7.5 Wh/day on Wi-Fi, ≈11.6 Wh/day on LTE; ≈3.5 / 2.3 days without sun):
+VOC, NOx, temperature and humidity are sampled every second; the SEN55 fan and laser run **1 minute
+in every 5** for particles; the station averages and uploads **once a minute**. The GPS is powered for
+up to 90 s every 15 minutes, and the LTE modem is started only when Wi-Fi is unavailable. The server
+carries the latest particle reading forward for up to 10 minutes so the AQI stays continuous, and marks
+a station offline after 5 minutes of silence.
 
 Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 
 1. In the app, signed in as a developer: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
-2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL and key.
-3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219* and *ArduinoJson* and upload.
+2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL, key and the SIM's APN.
+3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219*, *ArduinoJson* and *TinyGPSPlus*,
+   select the board **ESP32 Dev Module** and upload.
 
-LTE fallback and GPS through the SIM7600 are the next firmware sprint; the server and app already
-accept and show `network`, `latitude` and `longitude`.
+The LTE upload uses the A7670's built-in HTTP(S) AT commands (`lte.h`); test it on the bench with the
+exact breakout you buy. LTE needs the server on a public address (domain or VPS).
 
 ### Budget alternative
 

@@ -165,16 +165,16 @@ export const HEALTH_TIPS = [
 /** Where a value sits on a metric's scale (0..1) for the small gauges on reading tiles. */
 export const GAUGE_MAX = { pm1: 150, pm25: 150, pm4: 200, pm10: 250, voc_index: 500, nox_index: 500, temperature: 45, humidity: 100 };
 
-// Approximate state of charge of a 1-cell LiFePO4 pack from its voltage. LiFePO4 voltage is
-// flat in the middle of its range, so this is a rough guide, not a precise gauge.
-const LFP_CURVE = [[3.0, 0], [3.2, 10], [3.24, 20], [3.28, 40], [3.3, 60], [3.32, 80], [3.35, 95], [3.4, 100]];
+// Approximate state of charge of a 1-cell Li-ion pack (18650 cells in parallel) from its voltage.
+// Voltage reads a little high while charging and low under load, so this is a guide, not a gauge.
+const LI_ION_CURVE = [[3.3, 0], [3.45, 5], [3.6, 15], [3.7, 30], [3.75, 40], [3.8, 50], [3.87, 60], [3.95, 70], [4.02, 80], [4.1, 90], [4.2, 100]];
 export function batteryPercent(volts) {
   if (volts == null) return null;
-  if (volts <= LFP_CURVE[0][0]) return 0;
-  for (let i = 1; i < LFP_CURVE.length; i++) {
-    const [v1, p1] = LFP_CURVE[i];
+  if (volts <= LI_ION_CURVE[0][0]) return 0;
+  for (let i = 1; i < LI_ION_CURVE.length; i++) {
+    const [v1, p1] = LI_ION_CURVE[i];
     if (volts <= v1) {
-      const [v0, p0] = LFP_CURVE[i - 1];
+      const [v0, p0] = LI_ION_CURVE[i - 1];
       return Math.round(p0 + ((volts - v0) / (v1 - v0)) * (p1 - p0));
     }
   }

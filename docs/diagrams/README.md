@@ -22,5 +22,5 @@ background and are sized so text stays about 8 pt or larger when the image is pl
 desktop app, or in VS Code with the *Draw.io Integration* extension. Export with
 File → Export as → PNG (300 % zoom for print).
 
-Pin assignments follow LilyGO's official T-SIM7600 definitions (modem, SD card and on-board pins
-are reserved) and the Sensirion SEN5x pin-out.
+Pin assignments use a standard ESP32 DevKit V1 (ESP32-WROOM-32), avoiding its strapping and flash pins,
+and follow the Sensirion SEN5x pin-out.

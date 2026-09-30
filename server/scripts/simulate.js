@@ -64,8 +64,8 @@ function footTraffic(date) {
   return 0.08 + bump(7.5, 1.2, 1) + bump(12.2, 1, 0.55) + bump(18, 1.5, 0.95);
 }
 
-// Resting-voltage curve of one LiFePO4 cell (state of charge 0..1 -> volts).
-const OCV = [[0, 3.0], [0.1, 3.2], [0.2, 3.24], [0.4, 3.28], [0.6, 3.3], [0.8, 3.32], [0.95, 3.35], [1, 3.4]];
+// Resting-voltage curve of one Li-ion cell (state of charge 0..1 -> volts).
+const OCV = [[0, 3.3], [0.05, 3.45], [0.15, 3.6], [0.3, 3.7], [0.4, 3.75], [0.5, 3.8], [0.6, 3.87], [0.7, 3.95], [0.8, 4.02], [0.9, 4.1], [1, 4.2]];
 const ocv = (soc) => {
   for (let i = 1; i < OCV.length; i++) {
     if (soc <= OCV[i][0]) {
@@ -74,7 +74,7 @@ const ocv = (soc) => {
       return v0 + ((soc - s0) / (s1 - s0)) * (v1 - v0);
     }
   }
-  return 3.4;
+  return 4.2;
 };
 
 function makeGenerator(site) {
@@ -84,15 +84,17 @@ function makeGenerator(site) {
   let soc = 0.7; // battery state of charge
   let lastTime = null;
   return (date) => {
-    // Battery: 10 W panel by day (Manila time), ~0.6 W station load, 3.2 V pack of 77 Wh.
+    // Battery: 6 W panel by day (Manila time), ~0.31 W load on Wi-Fi (~0.48 W on LTE),
+    // 3 x 18650 in parallel (3.7 V, 9 Ah, ~33 Wh).
     const hours = lastTime ? Math.min(1, (date - lastTime) / 3600e3) : 0;
     lastTime = date;
     const hLocal = (date.getUTCHours() + 8 + date.getUTCMinutes() / 60) % 24;
     const sun = Math.max(0, Math.sin((Math.PI * (hLocal - 6)) / 12));
-    let netW = 10 * 0.75 * sun * (0.7 + 0.3 * Math.random()) - 0.6;
+    const loadW = site.network === 'lte' ? 0.48 : 0.31;
+    let netW = 6 * 0.75 * sun * (0.7 + 0.3 * Math.random()) - loadW;
     if (soc >= 0.999 && netW > 0) netW = 0; // charger stops at full
-    soc = Math.min(1, Math.max(0.05, soc + (netW * hours) / 77));
-    const current = netW / 3.25;
+    soc = Math.min(1, Math.max(0.05, soc + (netW * hours) / 33.3));
+    const current = netW / 3.7;
     const includePm = n++ % PM_EVERY === 0;
     const t = footTraffic(date) * site.traffic;
     if (Math.random() < 0.004) spike = 25 + Math.random() * 60;
@@ -109,7 +111,7 @@ function makeGenerator(site) {
         pm4: +(pm25 * 1.12).toFixed(1),
         pm10: +(pm25 * 1.35 + noise(2)).toFixed(1),
       }),
-      battery_voltage: +(ocv(soc) + current * 0.02).toFixed(3),
+      battery_voltage: +(ocv(soc) + current * 0.05).toFixed(3),
       battery_current: +current.toFixed(3),
       network: site.network ?? 'wifi',
       voc_index: Math.round(Math.min(500, Math.max(1, 95 + 140 * t + spike * 1.5 + noise(12)))),

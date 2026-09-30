@@ -101,6 +101,47 @@ the simulator, because it needs to add its placeholder stations. Leave out
 > To avoid the certificate warning, install Caddy's root CA on the phone. It is inside the
 > `caddy_data` volume: `docker compose cp web:/data/caddy/pki/authorities/local/root.crt .`
 
+### Remove a station
+
+Signed in as a developer: open the station → ⚙ → **Delete station**. It removes the station with all of
+its readings and alerts, for everyone. Without a developer account, from the project folder:
+
+```bash
+docker compose exec db psql -U ginhawa -d ginhawa -c "DELETE FROM devices WHERE name = 'Camaman-an';"
+```
+
+### Test it as a real app on your phone
+
+The app is a Progressive Web App: installed from the browser it gets its own icon and opens full screen
+like a native app. Phones only allow installing from a **trusted** HTTPS address, so the easiest way to
+test is the free temporary tunnel:
+
+```bash
+docker compose --profile tunnel up -d
+docker compose logs tunnel        # look for https://<random-words>.trycloudflare.com
+```
+
+Open that address on the phone (Wi-Fi or mobile data), sign in, then **Chrome menu → Add to Home screen /
+Install app** (Android) or **Share → Add to Home Screen** (iPhone, Safari). The address changes each time
+the tunnel restarts, and the app only works while this computer is on. For something permanent, deploy it
+online (below).
+
+### Connecting the real sensor
+
+1. Make the server reachable by the sensor: same Wi-Fi as this computer (see *Open it on your phone*, use
+   the computer's IP), the tunnel address above, or your online domain. LTE needs a public address.
+2. In the app, open the station (or **Add station**) → **Generate sensor key**. The app shows the key, a
+   ready-to-paste `config.h`, and two buttons to test the key from the browser before you touch the
+   hardware: **Test connection** (checks the key only) and **Send a sample reading**.
+3. Copy `firmware/ginhawa_node/config.example.h` to `config.h`, paste the values (plus your SIM's APN),
+   and upload the sketch with the Arduino IDE (board: *ESP32 Dev Module*). Wiring is in
+   `docs/diagrams/03-circuit-schematic.png`.
+4. Open the Serial Monitor (115200 baud): you should see `Uploaded 1 reading(s) over Wi-Fi`. The
+   station turns **Live** in the app within a minute.
+
+A device can also check its key and connection without storing anything with
+`GET /api/v1/ingest/ping` (header `X-Device-Key`).
+
 ### Deploying online
 
 On a cloud VM with a domain pointing at it, set `SITE_ADDRESS=ginhawa.yourdomain.com` and
@@ -222,6 +263,8 @@ limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_ma
 | POST | `/alerts/:id/ack` | mark as acknowledged (any signed-in user) |
 
 ### Ingest (used by the sensor node)
+`GET /ingest/ping` with header `X-Device-Key: gnh_…` checks the key and returns the station, storing nothing.
+
 `POST /ingest` with header `X-Device-Key: gnh_…`
 
 ```json

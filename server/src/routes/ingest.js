@@ -54,5 +54,14 @@ export default function ingestRouter(realtime) {
     res.status(201).json({ accepted: count, status: { aqi: latest.aqi, level: latest.level, category: latest.category } });
   });
 
+  /**
+   * GET /api/v1/ingest/ping
+   * Checks a device key and the connection without storing anything (used by the app's
+   * "Test connection" button and handy when setting up a new sensor).
+   */
+  router.get('/ping', requireDevice, (req, res) => {
+    res.json({ ok: true, device: { id: req.device.id, name: req.device.name, landmark: req.device.landmark } });
+  });
+
   return router;
 }

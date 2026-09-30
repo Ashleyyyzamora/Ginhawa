@@ -109,6 +109,11 @@ test('full flow: register, add device, ingest, live updates, alerts, history', o
 
   assert.equal((await api('/ingest', { method: 'POST', body: { pm25: 5 } })).status, 401);
   assert.equal((await api('/ingest', { method: 'POST', deviceKey: apiKey, body: { pm25: -1 } })).status, 400);
+  // Key check without storing anything
+  assert.equal((await api('/ingest/ping', { deviceKey: 'gnh_wrong' })).status, 401);
+  const ping = await api('/ingest/ping', { deviceKey: apiKey });
+  assert.equal(ping.status, 200);
+  assert.equal(ping.body.device.id, device.id);
 
   const liveReading = nextMessage(ws, 'reading');
   const liveAlert = nextMessage(ws, 'alert');

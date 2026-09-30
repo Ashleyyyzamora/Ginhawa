@@ -6,6 +6,7 @@ import { PageHeader } from '../components/Layout.jsx';
 import MetricTile from '../components/MetricTile.jsx';
 import { HistoryChart, HourlyChart } from '../components/Charts.jsx';
 import Icon from '../components/Icon.jsx';
+import ConnectGuide from '../components/ConnectGuide.jsx';
 import { HealthTips, HourlyStrip, StationHero, StationStatus } from '../components/StationHero.jsx';
 import { useUi } from '../components/ui.jsx';
 import { METRICS, duration, fmtDateTime, isOnline } from '../format.js';
@@ -39,6 +40,7 @@ export default function DeviceDetail() {
   const [profile, setProfile] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [hourly, setHourly] = useState(null);
+  const [setupKey, setSetupKey] = useState(null); // sensor key issued from the connect guide
 
   useEffect(() => {
     setPoints(null);
@@ -84,6 +86,14 @@ export default function DeviceDetail() {
     [subscribe, id, range.key],
   );
 
+  // A station's very first reading: reload charts and history that were loaded while it was empty.
+  const firstSeen = device?.last_seen_at != null;
+  const wasSeen = useRef(firstSeen);
+  useEffect(() => {
+    if (firstSeen && !wasSeen.current) setReloadKey((k) => k + 1);
+    wasSeen.current = firstSeen;
+  }, [firstSeen]);
+
   const spanMs = useMemo(() => range.ms, [range]);
 
   const exportCsv = async () => {
@@ -128,6 +138,13 @@ export default function DeviceDetail() {
         }
       />
 
+      {(!device.last_seen_at || setupKey) && <ConnectGuide device={device} apiKey={setupKey} setApiKey={setSetupKey} />}
+      {!device.last_seen_at ? (
+        <section className="card station-footer">
+          <p className="muted small">Added by {device.created_by}</p>
+        </section>
+      ) : (
+      <>
       <StationHero reading={r} online={online} lastSeen={device.last_seen_at} now={now} />
 
       <StationStatus device={device} now={now} />
@@ -219,6 +236,8 @@ export default function DeviceDetail() {
         <p className="muted small">Added by {device.created_by}</p>
         <button className="btn" onClick={exportCsv}><Icon name="download" size={18} /> Download last 30 days (CSV)</button>
       </section>
+      </>
+      )}
     </>
   );
 }

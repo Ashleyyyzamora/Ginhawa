@@ -552,3 +552,6 @@ details > * + * { margin-top: 8px; }
 @media (min-width: 520px) {
   .tabbar { border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-radius: 18px 18px 0 0; }
 }
+.admin-form { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.toggle-row { display: flex; align-items: flex-start; gap: 10px; font-weight: 500; }
+.toggle-row input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--brand); }

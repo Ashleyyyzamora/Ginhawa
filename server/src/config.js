@@ -17,17 +17,18 @@ export const config = {
   offlineAfterSeconds: Number(env.OFFLINE_AFTER_SECONDS ?? 300),
   // Used for "hour of day" foot-traffic profiles.
   timezone: env.TZ_NAME ?? 'Asia/Manila',
-  // Developers (comma-separated emails) can add and manage stations. Everyone else can view.
-  devEmails: new Set(
-    (env.DEV_EMAILS ?? '')
-      .split(',')
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean),
-  ),
+  // Team passcode for managing stations in the app (rename, thresholds, remove). No user accounts.
+  adminPasscode: env.ADMIN_PASSCODE ?? '',
+  // Shared secret built into the team's firmware: a device that knows it can add itself as a station.
+  enrollSecret: env.ENROLL_SECRET ?? '',
+  // Reverse geocoding (OpenStreetMap Nominatim) names new stations after their barangay.
+  // Set GEOCODE_URL to an empty string to turn it off.
+  geocodeUrl: env.GEOCODE_URL ?? 'https://nominatim.openstreetmap.org',
 };
-
-export const isDevEmail = (email) => config.devEmails.has(String(email).toLowerCase());
 
 if (config.env === 'production' && config.jwtSecret === DEV_SECRET) {
   throw new Error('JWT_SECRET must be set in production');
+}
+if (config.env === 'production' && (!config.adminPasscode || !config.enrollSecret)) {
+  throw new Error('ADMIN_PASSCODE and ENROLL_SECRET must be set in production (see .env.example)');
 }

@@ -2,17 +2,27 @@
 // Run with: TEST_DATABASE_URL=postgres://... npm test
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import WebSocket from 'ws';
 
 const dbUrl = process.env.TEST_DATABASE_URL;
-// Developers can manage stations; everyone else is a viewer.
-process.env.DEV_EMAILS = 'student@example.com, Batch@Example.com, dev2@example.com';
+// No user accounts: the team manages stations with a passcode; devices enroll with a team secret.
+process.env.ADMIN_PASSCODE = 'team-passcode';
+process.env.ENROLL_SECRET = 'team-enroll-secret';
+const SECRET = process.env.ENROLL_SECRET;
 const opts = { skip: dbUrl ? false : 'set TEST_DATABASE_URL to run API tests' };
 
-let base, wsUrl, instance, pool;
+let base, wsUrl, instance, pool, geocoder;
 
 before(async () => {
   if (!dbUrl) return;
+  // Stand-in for OpenStreetMap Nominatim's reverse geocoding.
+  geocoder = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ address: { quarter: 'Carmen', road: 'Max Suniel Street', city: 'Cagayan de Oro' } }));
+  });
+  await new Promise((r) => geocoder.listen(0, '127.0.0.1', r));
+  process.env.GEOCODE_URL = `http://127.0.0.1:${geocoder.address().port}`;
   process.env.DATABASE_URL = dbUrl;
   ({ pool } = await import('../src/db.js'));
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
@@ -26,15 +36,17 @@ after(async () => {
   if (!dbUrl) return;
   await instance.stop();
   await pool.end();
+  geocoder.close();
 });
 
-async function api(path, { token, deviceKey, ...init } = {}) {
+async function api(path, { token, deviceKey, enrollSecret, ...init } = {}) {
   const res = await fetch(base + path, {
     ...init,
     headers: {
       'content-type': 'application/json',
       ...(token && { authorization: `Bearer ${token}` }),
       ...(deviceKey && { 'x-device-key': deviceKey }),
+      ...(enrollSecret && { 'x-enroll-secret': enrollSecret }),
     },
     body: init.body && JSON.stringify(init.body),
   });
@@ -60,163 +72,147 @@ function nextMessage(ws, type) {
   });
 }
 
-test('full flow: register, add device, ingest, live updates, alerts, history', opts, async () => {
-  const reg = await api('/auth/register', {
-    method: 'POST',
-    body: { email: 'Student@Example.com', name: 'Student', password: 'password123' },
-  });
-  assert.equal(reg.status, 201);
-  assert.equal(reg.body.user.role, 'dev');
-  const token = reg.body.token;
 
-  const dup = await api('/auth/register', {
-    method: 'POST',
-    body: { email: 'student@example.com', name: 'X', password: 'password123' },
-  });
-  assert.equal(dup.status, 409);
+const enroll = (chip_id, extra = {}, secret = SECRET) =>
+  api('/enroll', { method: 'POST', enrollSecret: secret, body: { chip_id, ...extra } });
 
-  const login = await api('/auth/login', { method: 'POST', body: { email: 'student@example.com', password: 'password123' } });
-  assert.equal(login.status, 200);
-  const badLogin = await api('/auth/login', { method: 'POST', body: { email: 'student@example.com', password: 'nope' } });
-  assert.equal(badLogin.status, 401);
+async function adminToken() {
+  return (await api('/admin/login', { method: 'POST', body: { passcode: 'team-passcode' } })).body.token;
+}
 
-  const created = await api('/devices', {
-    method: 'POST',
-    token,
-    body: { name: 'Barangay Test', landmark: 'Near the market' },
-  });
-  assert.equal(created.status, 201);
-  const { device, apiKey } = created.body;
-  assert.match(apiKey, /^gnh_/);
-  assert.equal(device.api_key_hash, undefined);
-  assert.equal(device.landmark, 'Near the market');
-  assert.equal(device.created_by, 'Student');
-  assert.equal(device.can_manage, true);
+test('stations add themselves; viewing is public; the team manages with a passcode', opts, async () => {
+  // Admin passcode
+  assert.equal((await api('/admin/login', { method: 'POST', body: { passcode: 'wrong' } })).status, 401);
+  const token = await adminToken();
+  assert.ok(token);
+  assert.equal((await api('/admin/me', { token })).status, 200);
+  assert.equal((await api('/admin/me')).status, 401);
 
-  // Same name + landmark is a duplicate station (case-insensitive); another landmark is fine.
-  const dupStation = await api('/devices', { method: 'POST', token, body: { name: 'barangay test', landmark: 'near the MARKET' } });
-  assert.equal(dupStation.status, 409);
-  const second = await api('/devices', { method: 'POST', token, body: { name: 'Barangay Test', landmark: 'Plaza' } });
-  assert.equal(second.status, 201);
-  assert.equal((await api(`/devices/${second.body.device.id}`, { method: 'DELETE', token })).status, 204);
+  // Enrollment needs the team secret
+  assert.equal((await enroll('A1B2C3D4E5F6', {}, 'nope')).status, 401);
+  assert.equal((await api('/enroll', { method: 'POST', body: { chip_id: 'A1B2C3D4E5F6' } })).status, 401);
+  assert.equal((await enroll('bad id!')).status, 400);
 
-  // Live channel
+  // Live channel needs no sign-in
   const ws = new WebSocket(wsUrl);
-  await new Promise((r) => ws.on('open', r));
   const ready = nextMessage(ws, 'ready');
-  ws.send(JSON.stringify({ type: 'auth', token }));
+  await new Promise((r) => ws.on('open', r));
   await ready;
 
+  const createdMsg = nextMessage(ws, 'device_created');
+  const first = await enroll('a1b2c3d4e5f6');
+  assert.equal(first.status, 201);
+  const { device, apiKey } = first.body;
+  assert.match(apiKey, /^gnh_/);
+  assert.equal(device.name, 'New station (E5F6)');
+  assert.equal(device.name_from_gps, true);
+  assert.equal(device.api_key_hash, undefined);
+  assert.equal(device.chip_id, undefined, 'chip ID is only shown to the team');
+  assert.equal((await createdMsg).deviceId, device.id);
+
+  // Viewers (no token) see stations and data but cannot change them
+  const pub = await api('/devices');
+  assert.equal(pub.status, 200);
+  assert.equal(pub.body.devices.length, 1);
+  assert.equal(pub.body.devices[0].can_manage, false);
+  const asAdmin = await api(`/devices/${device.id}`, { token });
+  assert.equal(asAdmin.body.device.can_manage, true);
+  assert.equal(asAdmin.body.device.chip_id, 'A1B2C3D4E5F6');
+  assert.equal((await api(`/devices/${device.id}`, { method: 'PATCH', body: { name: 'x' } })).status, 401);
+  assert.equal((await api(`/devices/${device.id}`, { method: 'DELETE' })).status, 401);
+  assert.equal((await api('/devices', { method: 'POST', token, body: { name: 'Manual' } })).status, 404);
+
+  // Ingest + key checks
   assert.equal((await api('/ingest', { method: 'POST', body: { pm25: 5 } })).status, 401);
   assert.equal((await api('/ingest', { method: 'POST', deviceKey: apiKey, body: { pm25: -1 } })).status, 400);
-  // Key check without storing anything
   assert.equal((await api('/ingest/ping', { deviceKey: 'gnh_wrong' })).status, 401);
-  const ping = await api('/ingest/ping', { deviceKey: apiKey });
-  assert.equal(ping.status, 200);
-  assert.equal(ping.body.device.id, device.id);
+  assert.equal((await api('/ingest/ping', { deviceKey: apiKey })).body.device.id, device.id);
 
+  // First GPS fix names the station after its barangay
+  const renamed = nextMessage(ws, 'device_updated');
   const liveReading = nextMessage(ws, 'reading');
   const liveAlert = nextMessage(ws, 'alert');
   const ingest = await api('/ingest', {
     method: 'POST',
     deviceKey: apiKey,
-    body: { pm1: 30, pm25: 60, pm10: 80, voc_index: 120, nox_index: 3, temperature: 31, humidity: 70 },
+    body: { pm1: 30, pm25: 60, pm10: 80, voc_index: 120, nox_index: 3, latitude: 8.4772, longitude: 124.6459 },
   });
   assert.equal(ingest.status, 201);
-  assert.equal(ingest.body.accepted, 1);
   assert.equal(ingest.body.status.aqi, 154);
-  const msg = await liveReading;
-  assert.equal(msg.deviceId, device.id);
-  assert.equal(msg.reading.pm25, 60);
-  const alertMsg = await liveAlert;
-  assert.equal(alertMsg.alert.metric, 'pm25');
+  assert.equal((await liveReading).reading.pm25, 60);
+  assert.equal((await liveAlert).alert.metric, 'pm25');
+  const updated = await renamed;
+  assert.equal(updated.device.name, 'Barangay Carmen');
+  assert.equal(updated.device.landmark, 'Max Suniel Street, Cagayan de Oro');
+  assert.equal(updated.device.chip_id, undefined);
 
-  // Another high reading must not open a second alert, just raise the peak.
+  // Another high reading raises the peak instead of opening a second alert
   await api('/ingest', { method: 'POST', deviceKey: apiKey, body: { pm25: 90 } });
-  let alerts = await api('/alerts?status=open', { token });
+  let alerts = await api('/alerts?status=open');
   assert.equal(alerts.body.alerts.length, 1);
   assert.equal(alerts.body.alerts[0].peak_value, 90);
+  // Only the team acknowledges alerts
+  assert.equal((await api(`/alerts/${alerts.body.alerts[0].id}/ack`, { method: 'POST' })).status, 401);
+  assert.equal((await api(`/alerts/${alerts.body.alerts[0].id}/ack`, { method: 'POST', token })).status, 200);
 
-  // Clean air resolves it.
   const resolved = nextMessage(ws, 'alert_resolved');
   const t0 = Date.now();
   await api('/ingest', {
     method: 'POST',
     deviceKey: apiKey,
-    body: {
-      readings: [
-        { recorded_at: new Date(t0 + 1000).toISOString(), pm25: 8, voc_index: 100, nox_index: 1 },
-        { recorded_at: new Date(t0 + 2000).toISOString(), pm25: 6, voc_index: 100, nox_index: 1 },
-      ],
-    },
+    body: { readings: [
+      { recorded_at: new Date(t0 + 1000).toISOString(), pm25: 8, voc_index: 100, nox_index: 1 },
+      { recorded_at: new Date(t0 + 2000).toISOString(), pm25: 6, voc_index: 100, nox_index: 1 },
+    ] },
   });
   await resolved;
-  alerts = await api('/alerts?status=open', { token });
-  assert.equal(alerts.body.alerts.length, 0);
-  ws.close();
+  assert.equal((await api('/alerts?status=open')).body.alerts.length, 0);
 
-  const list = await api('/devices', { token });
-  assert.equal(list.body.devices.length, 1);
-  assert.equal(list.body.devices[0].online, true);
-  assert.equal(list.body.devices[0].latest.pm25, 6);
-
-  const raw = await api(`/devices/${device.id}/readings?bucket=raw`, { token });
+  // Public history, profile and CSV
+  const raw = await api(`/devices/${device.id}/readings?bucket=raw`);
   assert.equal(raw.body.points.length, 4);
-  const agg = await api(`/devices/${device.id}/readings?bucket=1h`, { token });
-  assert.ok(agg.body.points.length >= 1);
+  const agg = await api(`/devices/${device.id}/readings?bucket=1h`);
   assert.equal(agg.body.points.reduce((s, p) => s + p.samples, 0), 4);
-
-  const profile = await api(`/devices/${device.id}/hourly-profile`, { token });
-  assert.equal(profile.status, 200);
-  assert.ok(profile.body.hours.length >= 1);
-
-  const csv = await api(`/devices/${device.id}/export.csv`, { token });
-  assert.equal(csv.status, 200);
+  assert.equal((await api(`/devices/${device.id}/hourly-profile`)).status, 200);
+  const csv = await api(`/devices/${device.id}/export.csv`);
   assert.equal(csv.body.split('\n').length, 5);
 
-  const patched = await api(`/devices/${device.id}`, { method: 'PATCH', token, body: { pm25_threshold: 50 } });
+  // A second station in the same place gets a distinct name
+  const second = await enroll('0011223344AA');
+  const key2 = second.body.apiKey;
+  const renamed2 = nextMessage(ws, 'device_updated');
+  await api('/ingest', { method: 'POST', deviceKey: key2, body: { pm25: 5, latitude: 8.4773, longitude: 124.646 } });
+  assert.equal((await renamed2).device.name, 'Barangay Carmen 2');
+
+  // The team renames a station: the typed name sticks even when GPS reports again
+  const patched = await api(`/devices/${device.id}`, { method: 'PATCH', token, body: { name: 'Carmen Market', pm25_threshold: 50 } });
+  assert.equal(patched.body.device.name, 'Carmen Market');
+  assert.equal(patched.body.device.name_from_gps, false);
   assert.equal(patched.body.device.pm25_threshold, 50);
 
-  // Stations are shared: viewers can see them and their data, but not add or change them.
-  const other = await api('/auth/register', { method: 'POST', body: { email: 'o@x.com', name: 'O', password: 'password123' } });
-  assert.equal(other.body.user.role, 'viewer');
-  const otherToken = other.body.token;
-  assert.equal((await api('/devices', { method: 'POST', token: otherToken, body: { name: 'Nope' } })).status, 403);
-  const seen = await api(`/devices/${device.id}`, { token: otherToken });
-  assert.equal(seen.status, 200);
-  assert.equal(seen.body.device.can_manage, false);
-  assert.equal((await api('/devices', { token: otherToken })).body.devices.length, 1);
-  assert.equal((await api(`/devices/${device.id}/readings?bucket=raw`, { token: otherToken })).body.points.length, 4);
-  assert.equal((await api('/alerts', { token: otherToken })).body.alerts.length, 1);
-  assert.equal((await api(`/devices/${device.id}`, { method: 'PATCH', token: otherToken, body: { name: 'x' } })).status, 403);
-  assert.equal((await api(`/devices/${device.id}/rotate-key`, { method: 'POST', token: otherToken })).status, 403);
-  assert.equal((await api(`/devices/${device.id}`, { method: 'DELETE', token: otherToken })).status, 403);
-  // Viewers may acknowledge alerts.
-  const [firstAlert] = (await api('/alerts', { token: otherToken })).body.alerts;
-  assert.equal((await api(`/alerts/${firstAlert.id}/ack`, { method: 'POST', token: otherToken })).status, 200);
-
-  // Any developer can manage any station, not just the one who added it.
-  const dev2 = await api('/auth/register', { method: 'POST', body: { email: 'dev2@example.com', name: 'Dev Two', password: 'password123' } });
-  const dev2Station = await api(`/devices/${device.id}`, { token: dev2.body.token });
-  assert.equal(dev2Station.body.device.can_manage, true);
-  const renamed = await api(`/devices/${device.id}`, { method: 'PATCH', token: dev2.body.token, body: { landmark: 'Plaza' } });
-  assert.equal(renamed.body.device.landmark, 'Plaza');
-
-  // Rotating the key invalidates the old one.
-  const rotated = await api(`/devices/${device.id}/rotate-key`, { method: 'POST', token });
+  // Enrolling again (e.g. after reflashing) keeps the station and issues a new key
+  const again = await enroll('A1B2C3D4E5F6');
+  assert.equal(again.status, 200);
+  assert.equal(again.body.device.id, device.id);
+  assert.equal(again.body.device.name, 'Carmen Market');
   assert.equal((await api('/ingest', { method: 'POST', deviceKey: apiKey, body: { pm25: 1 } })).status, 401);
-  assert.equal((await api('/ingest', { method: 'POST', deviceKey: rotated.body.apiKey, body: { pm25: 1 } })).status, 201);
+  assert.equal((await api('/ingest', { method: 'POST', deviceKey: again.body.apiKey, body: { pm25: 1 } })).status, 201);
+
+  // Remove: the device may join again. Remove and block: it may not.
+  const second2 = second.body.device.id;
+  assert.equal((await api(`/devices/${second2}`, { method: 'DELETE', token })).status, 204);
+  assert.equal((await enroll('0011223344AA')).status, 201);
+  const rejoined = (await api('/devices')).body.devices.find((d) => d.name.startsWith('New station'));
+  assert.equal((await api(`/devices/${rejoined.id}?block=true`, { method: 'DELETE', token })).status, 204);
+  assert.equal((await enroll('0011223344AA')).status, 403);
+  ws.close();
 
   assert.equal((await api(`/devices/${device.id}`, { method: 'DELETE', token })).status, 204);
-  assert.equal((await api('/devices', { token })).body.devices.length, 0);
+  assert.equal((await api('/devices')).body.devices.length, 0);
 });
 
 test('buffered batch opens and resolves alerts at the readings\' own times', opts, async () => {
-  const { body: session } = await api('/auth/register', {
-    method: 'POST',
-    body: { email: 'batch@example.com', name: 'Batch', password: 'password123' },
-  });
-  const { body: created } = await api('/devices', { method: 'POST', token: session.token, body: { name: 'Buffered' } });
+  const { body: created } = await enroll('BATCH0001', { name: 'Buffered' });
   const t0 = Date.parse('2026-01-01T00:00:00Z');
   const at = (min, pm25) => ({ recorded_at: new Date(t0 + min * 60000).toISOString(), pm25 });
   // Sent out of order on purpose.
@@ -225,7 +221,7 @@ test('buffered batch opens and resolves alerts at the readings\' own times', opt
     deviceKey: created.apiKey,
     body: { readings: [at(3, 10), at(0, 5), at(1, 50), at(2, 80), at(4, 60)] },
   });
-  const { body } = await api(`/alerts?device_id=${created.device.id}`, { token: session.token });
+  const { body } = await api(`/alerts?device_id=${created.device.id}`);
   const alerts = body.alerts.sort((a, b) => a.id - b.id);
   assert.equal(alerts.length, 2);
   assert.equal(new Date(alerts[0].started_at).getTime(), t0 + 60000);
@@ -236,10 +232,9 @@ test('buffered batch opens and resolves alerts at the readings\' own times', opt
 });
 
 test('duty-cycled PM is carried forward; battery, network and GPS are stored', opts, async () => {
-  // dev2@example.com is a developer (see DEV_EMAILS above); reuse it to add a station.
-  const login = await api('/auth/login', { method: 'POST', body: { email: 'dev2@example.com', password: 'password123' } });
-  const token = login.body.token;
-  const { body: created } = await api('/devices', { method: 'POST', token, body: { name: 'Telemetry' } });
+  const token = await adminToken();
+  // A fixed name, so the GPS fix below does not rename it.
+  const { body: created } = await enroll('TELEMETRY1', { name: 'Telemetry' });
   const key = created.apiKey;
   const id = created.device.id;
   const t0 = Date.now() - 20 * 60e3;
@@ -264,6 +259,7 @@ test('duty-cycled PM is carried forward; battery, network and GPS are stored', o
   assert.equal(latest.battery_voltage, 3.3);
   assert.equal(latest.network, 'lte');
   assert.equal(body.device.latitude, 8.4822);
+  assert.equal(body.device.name, 'Telemetry');
   assert.ok(body.device.location_updated_at);
   assert.equal(body.device.online, true);
 
@@ -281,7 +277,7 @@ test('duty-cycled PM is carried forward; battery, network and GPS are stored', o
   const agg = await api(`/devices/${id}/readings?bucket=1h&from=${new Date(t0 - 3600e3).toISOString()}`, { token });
   assert.equal(agg.body.points.find((p) => p.pm25 != null).pm25, 40);
 
-  // Manual location override by a developer.
+  // Manual location override by the team.
   const patched = await api(`/devices/${id}`, { method: 'PATCH', token, body: { latitude: 8.48, longitude: 124.65 } });
   assert.equal(patched.body.device.longitude, 124.65);
   assert.equal((await api(`/devices/${id}`, { method: 'PATCH', token, body: { latitude: 8.48 } })).status, 400);

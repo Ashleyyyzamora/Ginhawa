@@ -69,14 +69,15 @@ void down() {
   powered = false;
 }
 
-// POST `body` to `url`. Returns the HTTP status (or -1) and fills `response`.
-int post(const String &url, const String &body, String &response) {
+// POST `body` to `url` with one extra header line (e.g. "X-Device-Key: gnh_..."). Returns the HTTP
+// status (or -1) and fills `response`.
+int post(const String &url, const String &body, const String &header, String &response) {
   if (!up()) return -1;
   cmd("AT+HTTPTERM", "OK", 1000);  // clear a session left open by an earlier failure
   if (!cmd("AT+HTTPINIT")) return -1;
   cmd("AT+HTTPPARA=\"URL\",\"" + url + "\"");
   cmd("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
-  cmd(String("AT+HTTPPARA=\"USERDATA\",\"X-Device-Key: ") + DEVICE_KEY + "\"");
+  cmd("AT+HTTPPARA=\"USERDATA\",\"" + header + "\"");
   int status = -1;
   if (cmd("AT+HTTPDATA=" + String(body.length()) + ",10000", "DOWNLOAD", 5000)) {
     at.print(body);

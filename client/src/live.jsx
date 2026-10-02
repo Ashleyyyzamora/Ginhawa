@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, tokenStore, wsUrl } from './api.js';
+import { api, wsUrl } from './api.js';
 import { useUi } from './components/ui.jsx';
+import { useAdmin } from './auth.jsx';
 import { METRICS } from './format.js';
 
 // Holds all stations (devices) and keeps them fresh from the WebSocket stream.
@@ -12,6 +13,7 @@ export function LiveProvider({ children }) {
   const [status, setStatus] = useState('connecting'); // connecting | live | offline
   const listeners = useRef(new Set());
   const { toast } = useUi();
+  const { isAdmin } = useAdmin();
 
   const refresh = useCallback(async () => {
     try {
@@ -50,7 +52,9 @@ export function LiveProvider({ children }) {
         list?.map((d) => (d.id === msg.alert.device_id ? { ...d, open_alerts: Math.max(0, d.open_alerts + delta) } : d)),
       );
     } else if (msg.type === 'device_updated') {
-      setDevices((list) => list?.map((d) => (d.id === msg.device.id ? { ...d, ...msg.device } : d)));
+      // Broadcasts are shared by everyone, so they never change what this viewer may manage.
+      const { can_manage, chip_id, ...shared } = msg.device;
+      setDevices((list) => list?.map((d) => (d.id === shared.id ? { ...d, ...shared } : d)));
     } else if (msg.type === 'device_created') {
       refresh();
     } else if (msg.type === 'device_deleted') {
@@ -74,7 +78,6 @@ export function LiveProvider({ children }) {
     const connect = () => {
       setStatus('connecting');
       ws = new WebSocket(wsUrl());
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token: tokenStore.get() }));
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'ready') {
@@ -99,6 +102,11 @@ export function LiveProvider({ children }) {
       ws?.close();
     };
   }, [refresh, handleEvent]);
+
+  // Signing in or out as the team changes which stations can be managed.
+  useEffect(() => {
+    refresh();
+  }, [isAdmin, refresh]);
 
   const subscribe = useCallback((fn) => {
     listeners.current.add(fn);

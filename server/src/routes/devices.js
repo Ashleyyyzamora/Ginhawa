@@ -2,9 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { config } from '../config.js';
-import { requireUser, requireDev, generateDeviceKey, hashDeviceKey } from '../auth.js';
+import { optionalAdmin } from '../auth.js';
 import { HttpError, isUuid } from '../http.js';
-import { METRICS, withCarriedPm, withSummary } from '../readings.js';
+import { METRICS } from '../readings.js';
+import { DEVICE_SELECT, serializeDevice } from '../stations.js';
 
 const BUCKETS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '6h': 21600, '1d': 86400 };
 const MAX_POINTS = 500;
@@ -15,7 +16,6 @@ const deviceFields = {
   name: z.string().trim().min(1).max(100),
   landmark: z.string().trim().max(200).nullish(),
 };
-const createSchema = z.object(deviceFields);
 const updateSchema = z
   .object({
     ...deviceFields,
@@ -25,6 +25,8 @@ const updateSchema = z
     // Manual location, for stations that cannot get a GPS fix (e.g. under a roof).
     latitude: z.number().min(-90).max(90).nullable(),
     longitude: z.number().min(-180).max(180).nullable(),
+    // true: name the station from its GPS position again (it becomes false when renamed by hand).
+    name_from_gps: z.boolean(),
   })
   .partial()
   .refine((b) => ('latitude' in b) === ('longitude' in b), { message: 'latitude and longitude must be sent together' });
@@ -35,30 +37,6 @@ const rangeSchema = z.object({
   bucket: z.enum(['auto', 'raw', ...Object.keys(BUCKETS)]).default('auto'),
 });
 
-/** Public shape of a device (never includes the key hash). */
-function serializeDevice(row, user) {
-  const { api_key_hash, owner_id, latest, latest_pm, open_alerts, ...device } = row;
-  const lastSeen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0;
-  return {
-    ...device,
-    online: Date.now() - lastSeen < config.offlineAfterSeconds * 1000,
-    latest: withSummary(withCarriedPm(latest ?? null, latest_pm)),
-    open_alerts: open_alerts ?? 0,
-    // Stations are visible to everyone; only developers may change them.
-    can_manage: user.isDev,
-  };
-}
-
-const DEVICE_SELECT = `
-  SELECT d.*,
-    (SELECT to_jsonb(r) FROM readings r WHERE r.device_id = d.id
-      ORDER BY r.recorded_at DESC LIMIT 1) AS latest,
-    (SELECT to_jsonb(p) FROM (SELECT pm1, pm25, pm4, pm10, recorded_at FROM readings r
-      WHERE r.device_id = d.id AND r.pm25 IS NOT NULL ORDER BY r.recorded_at DESC LIMIT 1) p) AS latest_pm,
-    (SELECT count(*)::int FROM alerts a WHERE a.device_id = d.id AND a.resolved_at IS NULL) AS open_alerts,
-    u.name AS created_by
-  FROM devices d JOIN users u ON u.id = d.owner_id`;
-
 async function loadDevice(req) {
   const { id } = req.params;
   if (!isUuid(id)) throw new HttpError(404, 'Station not found');
@@ -68,7 +46,7 @@ async function loadDevice(req) {
 }
 
 async function loadManagedDevice(req) {
-  if (!req.user.isDev) throw new HttpError(403, 'Only developers can manage stations');
+  if (!req.admin) throw new HttpError(401, 'Admin sign-in required');
   return loadDevice(req);
 }
 
@@ -98,37 +76,23 @@ function resolveRange(q) {
 
 export default function devicesRouter(realtime) {
   const router = Router();
-  router.use(requireUser);
+  router.use(optionalAdmin); // viewing is public; changes need the admin passcode
 
   router.get('/', async (req, res) => {
     const { rows } = await query(`${DEVICE_SELECT} ORDER BY lower(d.name), lower(coalesce(d.landmark, ''))`);
-    res.json({ devices: rows.map((r) => serializeDevice(r, req.user)) });
-  });
-
-  router.post('/', requireDev, async (req, res) => {
-    const body = createSchema.parse(req.body);
-    const apiKey = generateDeviceKey();
-    const { rows } = await query(
-      `INSERT INTO devices (owner_id, name, landmark, api_key_hash) VALUES ($1, $2, $3, $4) RETURNING id`,
-      [req.user.id, body.name, body.landmark || null, hashDeviceKey(apiKey)],
-    ).catch((err) => {
-      throw duplicateStation(err);
-    });
-    req.params.id = rows[0].id;
-    const device = serializeDevice(await loadDevice(req), req.user);
-    realtime.broadcast({ type: 'device_created', deviceId: device.id });
-    // The plain key is only ever returned here (and on rotate).
-    res.status(201).json({ device, apiKey });
+    res.json({ devices: rows.map((r) => serializeDevice(r, req.admin)) });
   });
 
   router.get('/:id', async (req, res) => {
-    res.json({ device: serializeDevice(await loadDevice(req), req.user) });
+    res.json({ device: serializeDevice(await loadDevice(req), req.admin) });
   });
 
   router.patch('/:id', async (req, res) => {
     const device = await loadManagedDevice(req);
     const body = updateSchema.parse(req.body);
     if (body.landmark === '') body.landmark = null;
+    // A name typed by the team wins over the GPS name.
+    if (('name' in body || 'landmark' in body) && !('name_from_gps' in body)) body.name_from_gps = false;
     const keys = Object.keys(body);
     if (keys.length) {
       let sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
@@ -139,25 +103,23 @@ export default function devicesRouter(realtime) {
         },
       );
     }
-    const updated = serializeDevice(await loadDevice(req), req.user);
-    // can_manage depends on who is looking, so leave it out of the broadcast.
-    const { can_manage, ...shared } = updated;
+    const updated = serializeDevice(await loadDevice(req), req.admin);
+    // Admin-only fields stay out of the broadcast, which goes to everyone.
+    const { can_manage, chip_id, ...shared } = updated;
     realtime.broadcast({ type: 'device_updated', device: shared });
     res.json({ device: updated });
   });
 
+  /** DELETE /devices/:id?block=true  — block=true also stops that device from joining again. */
   router.delete('/:id', async (req, res) => {
     const device = await loadManagedDevice(req);
+    const block = req.query.block === 'true' || req.query.block === '1';
+    if (block && device.chip_id) {
+      await query('INSERT INTO blocked_chips (chip_id) VALUES ($1) ON CONFLICT DO NOTHING', [device.chip_id]);
+    }
     await query('DELETE FROM devices WHERE id = $1', [device.id]);
     realtime.broadcast({ type: 'device_deleted', deviceId: device.id });
     res.status(204).end();
-  });
-
-  router.post('/:id/rotate-key', async (req, res) => {
-    const device = await loadManagedDevice(req);
-    const apiKey = generateDeviceKey();
-    await query('UPDATE devices SET api_key_hash = $2 WHERE id = $1', [device.id, hashDeviceKey(apiKey)]);
-    res.json({ apiKey });
   });
 
   /**

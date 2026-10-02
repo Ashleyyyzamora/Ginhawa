@@ -21,6 +21,9 @@
  *   "Sensirion I2C SEN5X" (+ "Sensirion Core"), "Adafruit INA219", "ArduinoJson" v7, "TinyGPSPlus"
  * Board: "ESP32 Dev Module" (esp32 by Espressif)
  *
+ * First power-on: POST {API_BASE_URL}/api/v1/enroll with header X-Enroll-Secret and
+ *   {"chip_id": <ESP32 hardware ID>} -> the station is added to the app and receives its own key,
+ *   which is kept in flash (Preferences). If the server ever rejects the key, it enrolls again.
  * Upload: POST {API_BASE_URL}/api/v1/ingest with header X-Device-Key, JSON
  *   {"readings":[{recorded_at, pm1..pm10 (only when measured), voc_index, nox_index,
  *                 temperature, humidity, battery_voltage, battery_current, network,
@@ -38,6 +41,7 @@
 #include <Adafruit_INA219.h>
 #include <TinyGPSPlus.h>
 #include <sys/time.h>
+#include <Preferences.h>
 #include "config.h"
 #include "lte.h"
 
@@ -70,6 +74,9 @@ TinyGPSPlus gps;
 bool gpsOn = false;
 unsigned long gpsStartedAt = 0, lastGpsRun = 0;
 double fixLat = NAN, fixLon = NAN;  // new fix waiting to be attached to the next reading
+
+Preferences prefs;
+String deviceKey;  // issued by the server at enrollment, stored in flash
 
 bool onLte = false;               // Wi-Fi was unavailable: uploads go through the LTE modem
 unsigned long lastWifiTry = 0;
@@ -175,20 +182,53 @@ String buildBody(const char *network) {
   return body;
 }
 
-int postWifi(const String &body, String &resp) {
+// HTTPS POST over Wi-Fi with one extra header. Returns the HTTP status (negative on network errors).
+int postWifi(const char *path, const String &body, const char *header, const String &value, String &resp) {
   WiFiClientSecure client;
   if (strlen(ROOT_CA_PEM) > 0) client.setCACert(ROOT_CA_PEM);
   else client.setInsecure();  // LAN demo only: encrypts but doesn't verify the server
 
   HTTPClient http;
   http.setTimeout(8000);
-  http.begin(client, String(API_BASE_URL) + "/api/v1/ingest");
+  http.begin(client, String(API_BASE_URL) + path);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.addHeader(header, value);
   int code = http.POST(body);
   resp = http.getString();
   http.end();
   return code;
+}
+
+int post(const char *path, const String &body, const char *header, const String &value, String &resp) {
+  if (!onLte) return postWifi(path, body, header, value, resp);
+  return lte::post(String(API_BASE_URL) + path, body, String(header) + ": " + value, resp);
+}
+
+String chipId() {
+  char id[13];
+  snprintf(id, sizeof id, "%012llX", (unsigned long long)ESP.getEfuseMac());
+  return String(id);
+}
+
+// Adds this station to the app (first power-on) or gets a new key (e.g. after the old one was rejected).
+bool enroll() {
+  JsonDocument doc;
+  doc["chip_id"] = chipId();
+  if (strlen(STATION_NAME) > 0) doc["name"] = STATION_NAME;
+  if (strlen(STATION_LANDMARK) > 0) doc["landmark"] = STATION_LANDMARK;
+  String body, resp;
+  serializeJson(doc, body);
+  int code = post("/api/v1/enroll", body, "X-Enroll-Secret", ENROLL_SECRET, resp);
+  JsonDocument res;
+  if ((code == 200 || code == 201) && !deserializeJson(res, resp) && res["apiKey"].is<const char *>()) {
+    deviceKey = res["apiKey"].as<String>();
+    prefs.putString("key", deviceKey);
+    Serial.printf("Enrolled as \"%s\" (chip %s)\n", (const char *)(res["device"]["name"] | "?"), chipId().c_str());
+    return true;
+  }
+  Serial.printf("Enrollment failed (HTTP %d): %s\n", code, resp.c_str());
+  if (code == 403) Serial.println("This device was blocked by the Ginhawa team.");
+  return false;
 }
 
 bool upload(float battV) {
@@ -209,16 +249,14 @@ bool upload(float battV) {
     }
   }
 
-  String resp;
-  int code;
-  if (!onLte) {
-    code = postWifi(buildBody("wifi"), resp);
-  } else if (!isnan(battV) && battV < LTE_MIN_BATTERY_V) {
+  if (onLte && !isnan(battV) && battV < LTE_MIN_BATTERY_V) {
     Serial.printf("Battery %.2f V: too low to start the LTE modem, keeping readings\n", battV);
     return false;
-  } else {
-    code = lte::post(String(API_BASE_URL) + "/api/v1/ingest", buildBody("lte"), resp);
   }
+  if (deviceKey.length() == 0 && !enroll()) return false;  // readings stay buffered
+
+  String resp;
+  int code = post("/api/v1/ingest", buildBody(onLte ? "lte" : "wifi"), "X-Device-Key", deviceKey, resp);
 
   if (code == 201) {
     JsonDocument res;
@@ -232,6 +270,10 @@ bool upload(float battV) {
   }
   Serial.printf("Upload failed (HTTP %d): %s\n", code, resp.c_str());
   if (code == 400) buffered = 0;  // payload rejected: don't retry the same bad data forever
+  if (code == 401) {               // key no longer valid (e.g. station removed): enroll again next time
+    deviceKey = "";
+    prefs.remove("key");
+  }
   return false;
 }
 
@@ -253,6 +295,10 @@ void setup() {
     Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
   }
   if (LTE_ENABLED) lte::begin();
+
+  prefs.begin("ginhawa", false);
+  deviceKey = prefs.getString("key", "");
+  Serial.printf("Chip ID %s, %s\n", chipId().c_str(), deviceKey.length() ? "already enrolled" : "will enroll on first upload");
 
   haveIna = ina219.begin();
   if (!haveIna) Serial.println("INA219 not found: battery data will be omitted");

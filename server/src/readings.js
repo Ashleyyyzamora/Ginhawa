@@ -1,5 +1,6 @@
 import { withTransaction } from './db.js';
 import { summarize } from './aqi.js';
+import { nameFromGps } from './geocode.js';
 
 // Numeric columns of a reading (averaged in history queries, exported to CSV).
 export const METRICS = [
@@ -89,7 +90,7 @@ async function evaluateAlerts(db, device, readings) {
 
 /**
  * Stores a batch of readings for a device, updates its alerts and pushes live
- * events to the device owner. Returns the newest stored reading.
+ * events to everyone watching. Returns the newest stored reading.
  */
 export async function ingestReadings(device, readings, realtime) {
   const result = await withTransaction(async (db) => {
@@ -130,5 +131,6 @@ export async function ingestReadings(device, readings, realtime) {
     ...(location && { location: { latitude: location.latitude, longitude: location.longitude, updated_at: location.recorded_at } }),
   });
   for (const event of alertEvents) realtime.broadcast(event);
+  if (location) nameFromGps(device, location, realtime);
   return { count: stored.length, latest };
 }

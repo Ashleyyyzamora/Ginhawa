@@ -1,4 +1,6 @@
-import { useAuth } from '../auth.jsx';
+import { useState } from 'react';
+import { useAdmin } from '../auth.jsx';
+import { useUi } from '../components/ui.jsx';
 import { ConnectionPill, PageHeader } from '../components/Layout.jsx';
 import Icon from '../components/Icon.jsx';
 import { useLive } from '../live.jsx';
@@ -11,31 +13,68 @@ const THEMES = [
   { key: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
-export default function Account() {
-  const { user, logout } = useAuth();
+/** Team sign-in with the shared admin passcode (there are no personal accounts). */
+function TeamAdmin() {
+  const { isAdmin, signIn, signOut } = useAdmin();
+  const { toast } = useUi();
+  const [passcode, setPasscode] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await signIn(passcode);
+      setPasscode('');
+      toast('Signed in as the Ginhawa team');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="group">
+      <h2 className="group-title">Team admin</h2>
+      {isAdmin ? (
+        <>
+          <div className="group-body">
+            <div className="row">
+              <span>Signed in as the Ginhawa team</span>
+              <span className="badge badge-brand">Admin</span>
+            </div>
+            <button className="row row-button row-danger" onClick={signOut}>Sign out</button>
+          </div>
+          <p className="group-footer">
+            Open a station and tap ⚙ to rename it, set its alert thresholds or remove it. To add a station, flash the
+            Ginhawa firmware onto it and switch it on: it joins and names itself from its GPS location.
+          </p>
+        </>
+      ) : (
+        <>
+          <form className="group-body admin-form" onSubmit={submit}>
+            <input type="password" placeholder="Team passcode" value={passcode} onChange={(e) => setPasscode(e.target.value)}
+              autoComplete="current-password" aria-label="Team passcode" required />
+            <button className="btn btn-primary" disabled={busy}>{busy ? 'Checking…' : 'Sign in'}</button>
+            {error && <p className="error" role="alert">{error}</p>}
+          </form>
+          <p className="group-footer">For the Ginhawa team only. Everyone else can use the app without signing in.</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+export default function Settings() {
   const { devices } = useLive();
   const { pref, setPref } = useTheme();
-  const isDev = user.role === 'dev';
 
   return (
     <>
-      <PageHeader title="Account" action={<ConnectionPill />} />
-
-      <section className="group">
-        <div className="profile">
-          <span className="avatar" aria-hidden="true">{user.name.trim().charAt(0).toUpperCase()}</span>
-          <div className="profile-text">
-            <strong className="truncate">{user.name}</strong>
-            <span className="muted small truncate">{user.email}</span>
-          </div>
-          <span className={`badge ${isDev ? 'badge-brand' : 'badge-muted'}`}>{isDev ? 'Developer' : 'Viewer'}</span>
-        </div>
-        <p className="group-footer">
-          {isDev
-            ? 'As a developer you can add stations and change or delete any station.'
-            : 'You can view every station and acknowledge alerts. Only the Ginhawa team can add or change stations.'}
-        </p>
-      </section>
+      <PageHeader title="Settings" action={<ConnectionPill />} />
 
       <section className="group">
         <h2 className="group-title">Appearance</h2>
@@ -75,11 +114,7 @@ export default function Account() {
         </div>
       </section>
 
-      <section className="group">
-        <div className="group-body">
-          <button className="row row-button row-danger" onClick={logout}>Sign out</button>
-        </div>
-      </section>
+      <TeamAdmin />
     </>
   );
 }

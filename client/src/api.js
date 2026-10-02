@@ -45,35 +45,19 @@ export async function request(path, { method = 'GET', body, raw = false } = {}) 
 }
 
 export const api = {
-  login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
-  register: (name, email, password) => request('/auth/register', { method: 'POST', body: { name, email, password } }),
-  me: () => request('/auth/me'),
+  adminLogin: (passcode) => request('/admin/login', { method: 'POST', body: { passcode } }),
+  adminMe: () => request('/admin/me'),
 
   devices: () => request('/devices'),
   device: (id) => request(`/devices/${id}`),
-  createDevice: (body) => request('/devices', { method: 'POST', body }),
   updateDevice: (id, body) => request(`/devices/${id}`, { method: 'PATCH', body }),
-  deleteDevice: (id) => request(`/devices/${id}`, { method: 'DELETE' }),
-  rotateKey: (id) => request(`/devices/${id}/rotate-key`, { method: 'POST' }),
+  // block: the device may not add itself again (lost or stolen hardware).
+  deleteDevice: (id, { block = false } = {}) => request(`/devices/${id}${block ? '?block=true' : ''}`, { method: 'DELETE' }),
   readings: (id, params) => request(`/devices/${id}/readings?${new URLSearchParams(params)}`),
   hourlyProfile: (id, days = 7) => request(`/devices/${id}/hourly-profile?days=${days}`),
   exportCsv: (id, params) => request(`/devices/${id}/export.csv?${new URLSearchParams(params)}`, { raw: true }),
 
   alerts: (params = {}) => request(`/alerts?${new URLSearchParams(params)}`),
   ackAlert: (id) => request(`/alerts/${id}/ack`, { method: 'POST' }),
-
-  // Sensor-side calls, authenticated with the station's key (used to test a new sensor setup).
-  pingSensor: (key) => deviceRequest('/ingest/ping', key),
-  sendSampleReading: (key, body) => deviceRequest('/ingest', key, { method: 'POST', body }),
 };
 
-async function deviceRequest(path, key, { method = 'GET', body } = {}) {
-  const res = await fetch(`${API_BASE}/api/v1${path}`, {
-    method,
-    headers: { 'x-device-key': key, ...(body && { 'content-type': 'application/json' }) },
-    body: body && JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText, data.issues);
-  return data;
-}

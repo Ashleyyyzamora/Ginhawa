@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { useAdmin } from '../auth.jsx';
 import { useLive } from '../live.jsx';
 import { PageHeader } from '../components/Layout.jsx';
 import { useUi } from '../components/ui.jsx';
@@ -8,6 +9,7 @@ import { METRICS, duration, fmtDateTime } from '../format.js';
 
 export default function Alerts() {
   const { subscribe } = useLive();
+  const { isAdmin } = useAdmin();
   const { toast } = useUi();
   const [status, setStatus] = useState('open');
   const [alerts, setAlerts] = useState(null);
@@ -66,9 +68,10 @@ export default function Alerts() {
                   Started {fmtDateTime(a.started_at)} · {a.resolved_at ? `lasted ${duration(a.started_at, a.resolved_at)}` : `ongoing for ${duration(a.started_at)}`}
                 </p>
                 {a.acknowledged_at ? (
-                  <p className="muted small">Acknowledged {fmtDateTime(a.acknowledged_at)}</p>
+                  <p className="muted small">Acknowledged by the Ginhawa team {fmtDateTime(a.acknowledged_at)}</p>
                 ) : (
-                  <button className="btn btn-small" onClick={() => ack(a)}>Acknowledge</button>
+                  // Only the team acknowledges, since it marks the alert as seen for everyone.
+                  isAdmin && <button className="btn btn-small" onClick={() => ack(a)}>Acknowledge</button>
                 )}
               </li>
             );

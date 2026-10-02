@@ -1,35 +1,41 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { config, isDevEmail } from './config.js';
+import { config } from './config.js';
 import { query } from './db.js';
 
-export function signUserToken(user) {
-  return jwt.sign({ sub: user.id, email: user.email, name: user.name }, config.jwtSecret, {
-    expiresIn: config.jwtExpiresIn,
-  });
+// There are no user accounts. Viewing is public; the team signs in with the admin passcode
+// to manage stations, and devices authenticate with their own key (or the team secret to enroll).
+
+/** Constant-time comparison of a submitted secret with the configured one. */
+export function secretMatches(given, expected) {
+  if (!expected || typeof given !== 'string') return false;
+  const a = crypto.createHash('sha256').update(given).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
-/** Returns { id, email, name, isDev } or throws. The dev list is checked on every request. */
-export function verifyUserToken(token) {
-  const payload = jwt.verify(token, config.jwtSecret);
-  return { id: payload.sub, email: payload.email, name: payload.name, isDev: isDevEmail(payload.email) };
-}
+export const signAdminToken = () =>
+  jwt.sign({ role: 'admin' }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
 
-export function requireUser(req, res, next) {
-  const header = req.get('authorization') ?? '';
-  const [scheme, token] = header.split(' ');
-  if (scheme !== 'Bearer' || !token) return res.status(401).json({ error: 'Missing bearer token' });
+function adminFromRequest(req) {
+  const [scheme, token] = (req.get('authorization') ?? '').split(' ');
+  if (scheme !== 'Bearer' || !token) return false;
   try {
-    req.user = verifyUserToken(token);
-    next();
+    return jwt.verify(token, config.jwtSecret).role === 'admin';
   } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
+    return false;
   }
 }
 
-/** Use after requireUser: only developers (DEV_EMAILS) may continue. */
-export function requireDev(req, res, next) {
-  if (!req.user?.isDev) return res.status(403).json({ error: 'Only developers can manage stations' });
+/** Marks the request as coming from the team (req.admin) without requiring it. */
+export function optionalAdmin(req, res, next) {
+  req.admin = adminFromRequest(req);
+  next();
+}
+
+export function requireAdmin(req, res, next) {
+  req.admin = adminFromRequest(req);
+  if (!req.admin) return res.status(401).json({ error: 'Admin sign-in required' });
   next();
 }
 

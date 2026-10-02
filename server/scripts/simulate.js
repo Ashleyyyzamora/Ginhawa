@@ -5,12 +5,12 @@
 //   node scripts/simulate.js --backfill 48      # first upload 48 h of history, then stream
 //   node scripts/simulate.js --devices 3        # simulate 3 stations
 //
-// Environment: API_URL (default http://localhost:4000), SIM_EMAIL, SIM_PASSWORD,
-// SIM_INTERVAL_SECONDS. The demo account is created if it does not exist.
+// Environment: API_URL (default http://localhost:4000), ENROLL_SECRET (the same team secret
+// as the server and the firmware), SIM_INTERVAL_SECONDS. Each simulated station enrolls itself
+// exactly like a real sensor that is switched on for the first time.
 
 const API_URL = (process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '') + '/api/v1';
-const EMAIL = process.env.SIM_EMAIL ?? 'demo@ginhawa.local';
-const PASSWORD = process.env.SIM_PASSWORD ?? 'ginhawa-demo';
+const ENROLL_SECRET = process.env.ENROLL_SECRET ?? '';
 const INTERVAL = Number(process.env.SIM_INTERVAL_SECONDS ?? 60) * 1000;
 // Like the real firmware, particles are measured 1 minute in every 5 (every 5th upload);
 // the other uploads carry VOC, NOx, temperature, humidity and battery data only.
@@ -26,35 +26,27 @@ const DEVICE_COUNT = argValue('--devices', Number(process.env.SIM_DEVICES ?? 2))
 
 // Placeholder stations: clearly not real places. Replace with your own via the app.
 // `traffic` only scales how busy each simulated spot is.
+// `chip` stands in for the ESP32's hardware ID.
 const SITES = [
-  { name: 'Station 1 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.2 },
-  { name: 'Station 2 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.8 },
-  { name: 'Station 3 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.6 },
-  { name: 'Station 4 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.5, network: 'lte' },
+  { chip: 'SIM0001', name: 'Station 1 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.2 },
+  { chip: 'SIM0002', name: 'Station 2 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.8 },
+  { chip: 'SIM0003', name: 'Station 3 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 0.6 },
+  { chip: 'SIM0004', name: 'Station 4 (placeholder)', landmark: 'Landmark (placeholder)', traffic: 1.5, network: 'lte' },
 ];
 
-async function api(path, { token, deviceKey, body, method = body ? 'POST' : 'GET' } = {}) {
+async function api(path, { deviceKey, enrollSecret, body, method = body ? 'POST' : 'GET' } = {}) {
   const res = await fetch(API_URL + path, {
     method,
     headers: {
       'content-type': 'application/json',
-      ...(token && { authorization: `Bearer ${token}` }),
       ...(deviceKey && { 'x-device-key': deviceKey }),
+      ...(enrollSecret && { 'x-enroll-secret': enrollSecret }),
     },
     body: body && JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(`${method} ${path} -> ${res.status} ${data.error ?? ''}`), { status: res.status });
   return data;
-}
-
-async function getToken() {
-  try {
-    return (await api('/auth/login', { body: { email: EMAIL, password: PASSWORD } })).token;
-  } catch (err) {
-    if (err.status !== 401) throw err;
-    return (await api('/auth/register', { body: { email: EMAIL, name: 'Demo User', password: PASSWORD } })).token;
-  }
 }
 
 // Foot traffic in Manila local time: morning & evening rush, lunch bump, quiet at night.
@@ -122,28 +114,20 @@ function makeGenerator(site) {
   };
 }
 
-async function setupDevice(token, site, existing) {
-  let device = existing.find((d) => d.name === site.name);
-  let apiKey;
-  if (device) {
-    ({ apiKey } = await api(`/devices/${device.id}/rotate-key`, { token, method: 'POST' }));
-  } else {
-    const { name, landmark } = site;
-    ({ device, apiKey } = await api('/devices', { token, body: { name, landmark } }));
-  }
+// Enrolls like a real station: the first time it creates the station, later it gets a fresh key.
+async function setupDevice(site) {
+  const { device, apiKey } = await api('/enroll', {
+    enrollSecret: ENROLL_SECRET,
+    body: { chip_id: site.chip, name: site.name, landmark: site.landmark },
+  });
   return { device, apiKey, generate: makeGenerator(site) };
 }
 
 async function main() {
-  console.log(`Simulator -> ${API_URL} as ${EMAIL}`);
-  const token = await getToken();
-  const { devices } = await api('/devices', { token });
-  const { user } = await api('/auth/me', { token });
-  if (user.role !== 'dev') {
-    throw new Error(`${EMAIL} is not a developer, so it cannot add stations. Add it to DEV_EMAILS and restart the server.`);
-  }
+  console.log(`Simulator -> ${API_URL}`);
+  if (!ENROLL_SECRET) throw new Error('Set ENROLL_SECRET (the same team secret as the server) to run the simulator.');
   const sims = [];
-  for (const site of SITES.slice(0, DEVICE_COUNT)) sims.push(await setupDevice(token, site, devices));
+  for (const site of SITES.slice(0, DEVICE_COUNT)) sims.push(await setupDevice(site));
 
   if (BACKFILL_HOURS > 0) {
     const step = 60 * 1000; // one point per minute of history
@@ -162,7 +146,7 @@ async function main() {
     }
   }
 
-  console.log(`Streaming ${sims.length} device(s) every ${INTERVAL / 1000}s. Log in to the app as ${EMAIL} / ${PASSWORD}`);
+  console.log(`Streaming ${sims.length} station(s) every ${INTERVAL / 1000}s.`);
   const tick = async () => {
     for (const sim of sims) {
       try {

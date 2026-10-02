@@ -29,7 +29,8 @@ services:
       DATABASE_URL: postgres://ginhawa:${POSTGRES_PASSWORD:-ginhawa}@db:5432/ginhawa
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
       TZ_NAME: ${TZ_NAME:-Asia/Manila}
-      DEV_EMAILS: ${DEV_EMAILS:-}
+      ADMIN_PASSCODE: ${ADMIN_PASSCODE:?Set ADMIN_PASSCODE in .env (see .env.example)}
+      ENROLL_SECRET: ${ENROLL_SECRET:?Set ENROLL_SECRET in .env (see .env.example)}
     depends_on:
       db:
         condition: service_healthy
@@ -62,8 +63,7 @@ services:
       API_URL: http://server:4000
       SIM_DEVICES: ${SIM_DEVICES:-3}
       SIM_BACKFILL_HOURS: ${SIM_BACKFILL_HOURS:-48}
-      SIM_EMAIL: ${SIM_EMAIL:-demo@ginhawa.local}
-      SIM_PASSWORD: ${SIM_PASSWORD:-ginhawa-demo}
+      ENROLL_SECRET: ${ENROLL_SECRET}
     depends_on:
       server:
         condition: service_healthy

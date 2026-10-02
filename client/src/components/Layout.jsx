@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { useAuth } from '../auth.jsx';
 import { useLive } from '../live.jsx';
 import Icon from './Icon.jsx';
 import { useTheme } from '../theme.js';
@@ -8,16 +7,14 @@ import { useTheme } from '../theme.js';
 const PULL_TRIGGER = 64;
 
 export default function Layout() {
-  const { user } = useAuth();
   const { devices, refreshAll } = useLive();
   const location = useLocation();
   const openAlerts = devices?.reduce((n, d) => n + d.open_alerts, 0) ?? 0;
   const tabs = [
     { to: '/', icon: 'home', label: 'Stations', end: true },
     { to: '/alerts', icon: 'bell', label: 'Alerts', badge: openAlerts },
-    user.role === 'dev' && { to: '/devices/new', icon: 'plus', label: 'Add station' },
-    { to: '/account', icon: 'user', label: 'Account' },
-  ].filter(Boolean);
+    { to: '/settings', icon: 'gear', label: 'Settings' },
+  ];
 
   // Pull-to-refresh (touch only): drag down from the top of the page.
   const [pull, setPull] = useState(0);

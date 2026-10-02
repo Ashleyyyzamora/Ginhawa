@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../auth.jsx';
+import { useAdmin } from '../auth.jsx';
 import { useLive, useNow } from '../live.jsx';
 import { ConnectionPill, PageHeader, ThemeToggle } from '../components/Layout.jsx';
 import Icon from '../components/Icon.jsx';
@@ -75,12 +75,11 @@ function Overview({ devices, now }) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { isAdmin } = useAdmin();
   const { devices, error } = useLive();
   const now = useNow();
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState(readSort);
-  const isDev = user.role === 'dev';
 
   const changeSort = (key) => {
     setSort(key);
@@ -100,7 +99,7 @@ export default function Dashboard() {
     <>
       <PageHeader
         title="Stations"
-        subtitle={`Hi ${user.name.split(' ')[0]}, here's the air right now`}
+        subtitle="Live air quality in high-foot-traffic areas"
         action={
           <>
             <ConnectionPill />
@@ -119,16 +118,14 @@ export default function Dashboard() {
         <div className="card empty">
           <Icon name="chip" size={40} />
           <h2>No stations yet</h2>
-          {isDev ? (
-            <>
-              <p className="muted">
-                Add a station where you placed a sensor (for example, a barangay) to get its sensor key, or run the
-                simulator to try the app with placeholder data.
-              </p>
-              <Link to="/devices/new" className="btn btn-primary">Add a station</Link>
-            </>
-          ) : (
-            <p className="muted">The Ginhawa team hasn't set up any stations yet. Check back soon.</p>
+          <p className="muted">
+            Stations appear here by themselves as soon as a Ginhawa sensor is switched on.
+          </p>
+          {isAdmin && (
+            <p className="muted small">
+              Flash the Ginhawa firmware (with the team secret) onto a station and power it on. To try the app
+              without hardware, run the simulator.
+            </p>
           )}
         </div>
       ) : (
@@ -184,7 +181,7 @@ export default function Dashboard() {
                           {d.landmark && <div className="station-card-sub truncate">{d.landmark}</div>}
                           <div className="station-card-status">
                             {fresh ? (
-                              <><span className="status-dot off" /> Sensor not connected yet</>
+                              <><span className="status-dot off" /> Just added</>
                             ) : (
                               <><span className={`status-dot ${online ? 'on' : 'off'}`} /> {online ? 'Live' : 'Offline'} · {timeAgo(d.last_seen_at, now)}</>
                             )}
@@ -200,7 +197,7 @@ export default function Dashboard() {
                       <div className="station-card-bottom">
                         {fresh ? (
                           <span className="setup-hint">
-                            <Icon name="chip" size={16} /> {isDev ? 'Tap to connect its sensor' : 'Readings will appear once it reports'}
+                            <Icon name="chip" size={16} /> Waiting for its first reading
                           </span>
                         ) : (
                         <>

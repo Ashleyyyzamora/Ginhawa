@@ -3,13 +3,12 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useLive } from '../live.jsx';
 import { PageHeader } from '../components/Layout.jsx';
-import KeyReveal from '../components/KeyReveal.jsx';
 import { useUi } from '../components/ui.jsx';
 
 const FIELDS = ['name', 'landmark', 'pm25_threshold', 'voc_threshold', 'nox_threshold'];
 const THRESHOLDS = ['pm25_threshold', 'voc_threshold', 'nox_threshold'];
 
-// Developers only: edit a station, change its sensor key, or delete it.
+// Team only (admin passcode): rename a station, set its thresholds, or remove it.
 export default function DeviceSettings() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -19,10 +18,9 @@ export default function DeviceSettings() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [newKey, setNewKey] = useState(null);
 
   useEffect(() => {
-    if (device && !form) setForm(Object.fromEntries(FIELDS.map((f) => [f, device[f] ?? ''])));
+    if (device && !form) setForm({ ...Object.fromEntries(FIELDS.map((f) => [f, device[f] ?? ''])), name_from_gps: device.name_from_gps });
   }, [device, form]);
 
   if (device && !device.can_manage) return <Navigate to={`/devices/${id}`} replace />;
@@ -35,7 +33,7 @@ export default function DeviceSettings() {
     setSaving(true);
     setError(null);
     try {
-      const body = { name: form.name, landmark: form.landmark || null };
+      const body = { name: form.name, landmark: form.landmark || null, name_from_gps: form.name_from_gps };
       for (const f of THRESHOLDS) if (form[f] !== '') body[f] = Number(form[f]);
       await api.updateDevice(id, body);
       await refresh();
@@ -47,32 +45,20 @@ export default function DeviceSettings() {
     }
   };
 
-  const rotate = async () => {
+  const remove = async (block) => {
     const ok = await confirm({
-      title: 'Generate a new sensor key?',
-      message: 'The sensor at this station will stop sending data until you put the new key in its firmware.',
-      confirmLabel: 'Generate key',
-    });
-    if (!ok) return;
-    try {
-      setNewKey((await api.rotateKey(id)).apiKey);
-    } catch (err) {
-      toast(err.message, { tone: 'danger' });
-    }
-  };
-
-  const remove = async () => {
-    const ok = await confirm({
-      title: `Delete ${device.name}?`,
-      message: 'This removes the station for everyone, with all of its readings and alerts. It cannot be undone.',
-      confirmLabel: 'Delete station',
+      title: block ? `Remove and block ${device.name}?` : `Remove ${device.name}?`,
+      message: block
+        ? 'Removes the station with all of its readings and alerts, and stops this device from joining again. Use this for lost or stolen hardware.'
+        : 'Removes the station with all of its readings and alerts, for everyone. If its device is still switched on, it will join again as a new station.',
+      confirmLabel: block ? 'Remove and block' : 'Remove station',
       danger: true,
     });
     if (!ok) return;
     try {
-      await api.deleteDevice(id);
+      await api.deleteDevice(id, { block });
       await refresh();
-      toast(`${device.name} deleted`);
+      toast(`${device.name} removed`);
       navigate('/');
     } catch (err) {
       toast(err.message, { tone: 'danger' });
@@ -86,11 +72,22 @@ export default function DeviceSettings() {
         <h2>Station</h2>
         <label>
           Station / location
-          <input value={form.name} onChange={set('name')} placeholder="e.g. Barangay Carmen" required maxLength={100} />
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value, name_from_gps: false })}
+            placeholder="e.g. Barangay Carmen" required maxLength={100} />
         </label>
         <label>
           Landmark / spot
-          <input value={form.landmark} onChange={set('landmark')} placeholder="e.g. Near the public market entrance" maxLength={200} />
+          <input value={form.landmark} onChange={(e) => setForm({ ...form, landmark: e.target.value, name_from_gps: false })}
+            placeholder="e.g. Near the public market entrance" maxLength={200} />
+        </label>
+        <label className="toggle-row">
+          <input type="checkbox" checked={form.name_from_gps} onChange={(e) => setForm({ ...form, name_from_gps: e.target.checked })} />
+          <span>
+            Name it from its GPS location
+            <span className="muted small" style={{ display: 'block', fontWeight: 400 }}>
+              The station is named after its barangay automatically, and renamed if it is moved. Typing a name turns this off.
+            </span>
+          </span>
         </label>
         <h2>Alert thresholds</h2>
         <p className="muted small">An alert opens when the latest reading goes above a threshold and closes when it drops back.</p>
@@ -106,15 +103,17 @@ export default function DeviceSettings() {
         <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
       </form>
 
-      <section className="card form">
-        <h2>Sensor key</h2>
-        <p className="muted small">Replace the key if it was shared by mistake or you're moving the sensor to a new board.</p>
-        {newKey ? <KeyReveal apiKey={newKey} /> : <button type="button" className="btn" onClick={rotate}>Generate new key</button>}
-      </section>
+      {device.chip_id && (
+        <section className="card form">
+          <h2>Device</h2>
+          <p className="muted small">Hardware ID <code>{device.chip_id}</code>. It joined by itself on {new Date(device.created_at).toLocaleDateString()}.</p>
+        </section>
+      )}
 
       <section className="card form danger-zone">
         <h2>Danger zone</h2>
-        <button type="button" className="btn btn-danger" onClick={remove}>Delete station</button>
+        <button type="button" className="btn btn-danger" onClick={() => remove(false)}>Remove station</button>
+        <button type="button" className="btn btn-danger" onClick={() => remove(true)}>Remove and block device</button>
       </section>
     </>
   );

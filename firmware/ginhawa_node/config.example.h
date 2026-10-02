@@ -10,8 +10,15 @@
 // The LTE fallback reaches the server over the internet, so it needs a public address (domain or VPS).
 #define API_BASE_URL   "https://192.168.1.20"
 
-// Key shown once in the app when you add this sensor's station (Add station -> copy key).
-#define DEVICE_KEY     "gnh_paste_your_key_here"
+// Team secret: the same value as ENROLL_SECRET in the server's .env, and the same for every station.
+// On first power-on the station uses it to add itself to the app and receives its own key, which it
+// keeps in flash memory. No per-station setup in the app is needed.
+#define ENROLL_SECRET  "paste-ENROLL_SECRET-from-.env"
+
+// Optional fixed name and landmark. Leave both "" to have the station named automatically after the
+// barangay at its GPS position (the team can still rename it in the app).
+#define STATION_NAME      ""
+#define STATION_LANDMARK  ""
 
 // Leave empty ("") to skip certificate checks, fine for a LAN demo with Caddy's self-signed
 // certificate. For a real domain, paste the root CA PEM (e.g. ISRG Root X1 for Let's Encrypt).

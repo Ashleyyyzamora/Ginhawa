@@ -23,11 +23,14 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 
 ## Features
 
-- **Stations**: each sensor is a station named after where it is placed (e.g. *Barangay Carmen*) plus an
-  optional landmark (e.g. *near the public market entrance*). Adding a sensor adds its station.
-- **Two roles**: **developers** (the team, listed in `DEV_EMAILS`) add, edit and delete any station.
-  **Viewers** (anyone else who signs up) see every station, its live data and alerts, can acknowledge
-  alerts and download data, but can't change stations.
+- **No accounts**: the app opens straight to the stations; anyone can view live data, history, alerts
+  and download CSV without signing in.
+- **Stations add themselves**: flash the same firmware onto every station and switch it on. It joins
+  with the team secret (`ENROLL_SECRET`), receives its own key, and is named after the barangay at its
+  GPS position (e.g. *Barangay Carmen*, OpenStreetMap). Moving it renames it.
+- **Team admin**: the team signs in under **Settings → Team admin** with a shared passcode
+  (`ADMIN_PASSCODE`) to rename stations, set alert thresholds, acknowledge alerts, and remove stations
+  (or remove **and block** a lost or stolen device).
 - **Overview**: the worst air right now, stations online, active alerts and the worst station at a glance
 - **Search & sort** stations by barangay/landmark; sort by worst air, A–Z or most recently updated
 - **Live dashboard**: every station's AQI, PM2.5, VOC and NOx, updating live over WebSocket as each station reports (once a minute)
@@ -63,33 +66,26 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```bash
-cp .env.example .env          # set JWT_SECRET, and put your team's emails in DEV_EMAILS
+cp .env.example .env          # set JWT_SECRET, ADMIN_PASSCODE and ENROLL_SECRET
 docker compose --profile simulator up --build
 ```
 
 Open **https://localhost**. Your browser will warn about the certificate because Caddy made its own
-local one. Click *Advanced → Proceed*. Sign in with the demo account the simulator creates:
+local one. Click *Advanced → Proceed*. There is no sign-in: the stations show right away.
 
-- **Email:** `demo@ginhawa.local`
-- **Password:** `ginhawa-demo`
+The simulator adds 3 placeholder stations ("Station 1 (placeholder)", …) the same way a real sensor
+joins, loads 48 h of history and then streams live data. Leave out `--profile simulator` to run without
+fake data, and remove the placeholders (station ⚙ → Remove station) once your real stations are running.
 
-It creates 3 placeholder stations ("Station 1 (placeholder)", …), loads 48 h of history and then streams
-live data. The placeholder stations are visible to every user, so delete them (station ⚙ → Delete station,
-signed in as a developer) once your real stations are running.
+### Team admin
 
-### Who is a developer?
+Go to **Settings → Team admin** and enter the `ADMIN_PASSCODE` from `.env`. Signed in, every station gets
+a ⚙ button (rename, alert thresholds, GPS naming on/off, remove, remove and block) and alerts get an
+**Acknowledge** button. Share the passcode only within the team; change it in `.env` and run
+`docker compose up -d` to lock everyone out again.
 
-Only emails listed in `DEV_EMAILS` (in `.env`, comma-separated) can add, edit or delete stations:
-
-```
-DEV_EMAILS=demo@ginhawa.local,ana@gmail.com,ben@gmail.com
-```
-
-Sign up in the app with one of those emails and you get the **Add station** tab. Everyone else is a
-viewer. After changing the list, restart the server (`docker compose up -d`); the change applies
-immediately, even to people who are already signed in. Keep `demo@ginhawa.local` in the list while you use
-the simulator, because it needs to add its placeholder stations. Leave out
-`--profile simulator` to run without fake data.
+> **Upgrading from the version with accounts:** add `ADMIN_PASSCODE` and `ENROLL_SECRET` to your `.env`
+> (see `.env.example`). Existing stations and their data are kept; user accounts are removed.
 
 ### Open it on your phone (same Wi-Fi)
 
@@ -103,8 +99,9 @@ the simulator, because it needs to add its placeholder stations. Leave out
 
 ### Remove a station
 
-Signed in as a developer: open the station → ⚙ → **Delete station**. It removes the station with all of
-its readings and alerts, for everyone. Without a developer account, from the project folder:
+Signed in as the team: open the station → ⚙ → **Remove station**. If its device is still switched on it
+will join again as a new station; use **Remove and block device** for hardware that should never come
+back. Without the app, from the project folder:
 
 ```bash
 docker compose exec db psql -U ginhawa -d ginhawa -c "DELETE FROM devices WHERE name = 'Camaman-an';"
@@ -121,7 +118,7 @@ docker compose --profile tunnel up -d
 docker compose logs tunnel        # look for https://<random-words>.trycloudflare.com
 ```
 
-Open that address on the phone (Wi-Fi or mobile data), sign in, then **Chrome menu → Add to Home screen /
+Open that address on the phone (Wi-Fi or mobile data), then **Chrome menu → Add to Home screen /
 Install app** (Android) or **Share → Add to Home Screen** (iPhone, Safari). The address changes each time
 the tunnel restarts, and the app only works while this computer is on. For something permanent, deploy it
 online (below).
@@ -130,17 +127,16 @@ online (below).
 
 1. Make the server reachable by the sensor: same Wi-Fi as this computer (see *Open it on your phone*, use
    the computer's IP), the tunnel address above, or your online domain. LTE needs a public address.
-2. In the app, open the station (or **Add station**) → **Generate sensor key**. The app shows the key, a
-   ready-to-paste `config.h`, and two buttons to test the key from the browser before you touch the
-   hardware: **Test connection** (checks the key only) and **Send a sample reading**.
-3. Copy `firmware/ginhawa_node/config.example.h` to `config.h`, paste the values (plus your SIM's APN),
-   and upload the sketch with the Arduino IDE (board: *ESP32 Dev Module*). Wiring is in
+2. Copy `firmware/ginhawa_node/config.example.h` to `config.h` and fill in Wi-Fi, `API_BASE_URL`,
+   `ENROLL_SECRET` (the same value as in `.env`) and the SIM's APN. The same `config.h` works for every
+   station. Upload with the Arduino IDE (board: *ESP32 Dev Module*). Wiring is in
    `docs/diagrams/03-circuit-schematic.png`.
-4. Open the Serial Monitor (115200 baud): you should see `Uploaded 1 reading(s) over Wi-Fi`. The
-   station turns **Live** in the app within a minute.
+3. Switch the station on and open the Serial Monitor (115200 baud). You should see
+   `Enrolled as "New station (F1B8)"` and then `Uploaded 1 reading(s) over Wi-Fi`. The station appears in
+   the app for everyone within a minute, and is renamed after its barangay once the GPS has a fix.
 
-A device can also check its key and connection without storing anything with
-`GET /api/v1/ingest/ping` (header `X-Device-Key`).
+A device can check its key and connection without storing anything with `GET /api/v1/ingest/ping`
+(header `X-Device-Key`).
 
 ### Deploying online
 
@@ -159,7 +155,7 @@ createdb ginhawa   # or: docker run -d -p 5432:5432 -e POSTGRES_USER=ginhawa -e 
 
 # API → http://localhost:4000 (runs migrations on start)
 cd server && npm install
-DEV_EMAILS=demo@ginhawa.local,you@example.com DATABASE_URL=postgres://ginhawa:ginhawa@localhost:5432/ginhawa npm run dev
+ADMIN_PASSCODE=team ENROLL_SECRET=dev-secret DATABASE_URL=postgres://ginhawa:ginhawa@localhost:5432/ginhawa npm run dev
 
 # simulator (another terminal)
 cd server && npm run simulate -- --backfill 48 --devices 3
@@ -209,8 +205,9 @@ a station offline after 5 minutes of silence.
 
 Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 
-1. In the app, signed in as a developer: **Add station** → enter where the sensor is placed (e.g. *Barangay Carmen*) → copy the key.
-2. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL, key and the SIM's APN.
+1. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL, `ENROLL_SECRET` (from `.env`) and
+   the SIM's APN. Optionally set `STATION_NAME` / `STATION_LANDMARK`; otherwise the GPS names it.
+2. Switch it on: it adds itself to the app (see *Connecting the real sensor*).
 3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219*, *ArduinoJson* and *TinyGPSPlus*,
    select the board **ESP32 Dev Module** and upload.
 
@@ -233,25 +230,28 @@ the server stays the same.
 
 ## API reference
 
-Base URL `https://<host>/api/v1`. JSON everywhere. User endpoints need `Authorization: Bearer <token>`.
+Base URL `https://<host>/api/v1`. JSON everywhere. Reading is public; team-only endpoints need
+`Authorization: Bearer <token>` from `/admin/login` (otherwise `401`).
 
-### Auth
+### Team admin
 | Method | Path | Body / notes |
 |---|---|---|
-| POST | `/auth/register` | `{name, email, password(≥8)}` → `{token, user}`; `user.role` is `dev` or `viewer` |
-| POST | `/auth/login` | `{email, password}` → `{token, user}` |
-| GET | `/auth/me` | current user |
+| POST | `/admin/login` | `{passcode}` → `{token}` (rate-limited) |
+| GET | `/admin/me` | `200` while the token is valid |
+
+### Enrollment (used by the station on first power-on)
+`POST /enroll` with header `X-Enroll-Secret: <ENROLL_SECRET>` and `{"chip_id": "24A160C3F1B8", "name"?, "landmark"?}`
+→ `201 {device, apiKey}` for a new station, or `200` with a new key for a station that enrolled before
+(its name and history are kept). `401` wrong secret, `403` blocked device. Without `name` the station is
+called "New station (F1B8)" until its first GPS fix names it after the barangay.
 
 ### Stations (`/devices`, one sensor = one station)
-Every signed-in user can read every station. Adding or changing one (POST, PATCH, DELETE, rotate-key) is
-limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_manage` and `created_by`.
-
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/devices` | all stations, each with `latest` reading (incl. `aqi`, `level`, `category`), `online`, `open_alerts`, `created_by`, `can_manage` |
-| POST | `/devices` | `{name, landmark?}`, e.g. `{"name":"Barangay Carmen","landmark":"Near the public market"}` → `{device, apiKey}` (**key shown once**). `409` if the same name + landmark exists |
-| GET / PATCH / DELETE | `/devices/:id` | PATCH accepts `name`, `landmark`, `pm25_threshold`, `voc_threshold`, `nox_threshold`, and `latitude` + `longitude` (manual location) |
-| POST | `/devices/:id/rotate-key` | new `apiKey`; the old one stops working |
+| GET | `/devices` | all stations, each with `latest` reading (incl. `aqi`, `level`, `category`), `online`, `open_alerts`, `name_from_gps`, `can_manage` |
+| GET | `/devices/:id` | one station (`chip_id` only for the team) |
+| PATCH | `/devices/:id` | team: `name`, `landmark`, `name_from_gps`, `pm25_threshold`, `voc_threshold`, `nox_threshold`, `latitude` + `longitude` |
+| DELETE | `/devices/:id?block=true` | team: remove; `block=true` also stops the device from enrolling again |
 | GET | `/devices/:id/readings?from&to&bucket` | time series; `bucket` = `auto` (default) \| `raw` \| `1m` `5m` `15m` `1h` `6h` `1d`; default last 24 h |
 | GET | `/devices/:id/hourly-profile?days=7` | average PM2.5 / VOC / NOx per hour of day |
 | GET | `/devices/:id/export.csv?from&to` | raw readings as CSV |
@@ -260,7 +260,7 @@ limited to developers (`DEV_EMAILS`); others get `403`. Each station has `can_ma
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/alerts?status=open\|all&device_id&limit` | newest first |
-| POST | `/alerts/:id/ack` | mark as acknowledged (any signed-in user) |
+| POST | `/alerts/:id/ack` | team: mark as acknowledged |
 
 ### Ingest (used by the sensor node)
 `GET /ingest/ping` with header `X-Device-Key: gnh_…` checks the key and returns the station, storing nothing.
@@ -282,8 +282,7 @@ to upload a buffered batch. The response `{"accepted": 1, "status": {"aqi": 57, 
 lets the device drive a status LED.
 
 ### WebSocket `wss://<host>/ws`
-1. Send `{"type":"auth","token":"<JWT>"}` as the first message and receive `{"type":"ready"}`.
-2. After that the server pushes events for **all** stations:
+No sign-in. The server sends `{"type":"ready"}` on connect, then pushes events for **all** stations:
    - `{"type":"reading","deviceId","reading"}`
    - `{"type":"alert","alert"}` / `{"type":"alert_resolved","alert"}`
    - `{"type":"device_created","deviceId"}` / `{"type":"device_updated","device"}` / `{"type":"device_deleted","deviceId"}`
@@ -292,10 +291,10 @@ lets the device drive a status LED.
 
 ## Database schema
 
-`users` → `devices` = stations (name, landmark, who added it, thresholds, hashed API key; name + landmark
-unique) → `readings` (time series,
+`devices` = stations (chip ID, name, landmark, GPS location, name-from-GPS flag, thresholds, hashed
+device key; name + landmark unique) → `readings` (time series,
 indexed on `(device_id, recorded_at)`) and `alerts` (at most one open alert per device+metric,
-enforced by a partial unique index). Migrations are in `server/src/migrations/` and run automatically at start-up.
+enforced by a partial unique index); `blocked_chips` lists devices that may not enroll again. Migrations are in `server/src/migrations/` and run automatically at start-up.
 
 ## Ideas for next steps
 

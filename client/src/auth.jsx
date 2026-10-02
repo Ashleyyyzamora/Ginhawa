@@ -1,40 +1,31 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api, setUnauthorizedHandler, tokenStore } from './api.js';
 
-const AuthContext = createContext(null);
+// There are no user accounts: anyone can view. The Ginhawa team signs in with the admin
+// passcode (Settings → Team admin) to rename stations, set thresholds and remove stations.
+const AdminContext = createContext(null);
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(Boolean(tokenStore.get()));
+export function AdminProvider({ children }) {
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  const logout = useCallback(() => {
+  const signOut = useCallback(() => {
     tokenStore.set(null);
-    setUser(null);
+    setIsAdmin(false);
   }, []);
 
   useEffect(() => {
-    setUnauthorizedHandler(logout);
+    setUnauthorizedHandler(signOut);
     if (!tokenStore.get()) return;
-    api
-      .me()
-      .then(({ user }) => setUser(user))
-      .catch(() => logout())
-      .finally(() => setLoading(false));
-  }, [logout]);
+    api.adminMe().then(() => setIsAdmin(true)).catch(signOut);
+  }, [signOut]);
 
-  const handleSession = ({ token, user }) => {
+  const signIn = async (passcode) => {
+    const { token } = await api.adminLogin(passcode);
     tokenStore.set(token);
-    setUser(user);
+    setIsAdmin(true);
   };
 
-  const value = {
-    user,
-    loading,
-    logout,
-    login: async (email, password) => handleSession(await api.login(email, password)),
-    register: async (name, email, password) => handleSession(await api.register(name, email, password)),
-  };
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AdminContext.Provider value={{ isAdmin, signIn, signOut }}>{children}</AdminContext.Provider>;
 }
 
-export const useAuth = () => useContext(AuthContext);
+export const useAdmin = () => useContext(AdminContext);

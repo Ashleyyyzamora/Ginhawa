@@ -1,11 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { query } from '../db.js';
-import { requireUser } from '../auth.js';
+import { requireAdmin } from '../auth.js';
 import { HttpError, isUuid } from '../http.js';
 
 const router = Router();
-router.use(requireUser);
 
 const listSchema = z.object({
   status: z.enum(['open', 'all']).default('all'),
@@ -27,7 +26,8 @@ router.get('/', async (req, res) => {
   res.json({ alerts: rows });
 });
 
-router.post('/:id/ack', async (req, res) => {
+// Acknowledging hides an alert's button for everyone, so only the team may do it.
+router.post('/:id/ack', requireAdmin, async (req, res) => {
   if (!/^\d+$/.test(req.params.id)) throw new HttpError(404, 'Alert not found');
   const { rows } = await query(
     `UPDATE alerts a SET acknowledged_at = COALESCE(a.acknowledged_at, now())

@@ -28,7 +28,7 @@ app (installable on Android/iOS home screens). Everything runs with one **Docker
 - **Stations add themselves**: flash the same firmware onto every station and switch it on. It joins
   with the team secret (`ENROLL_SECRET`), receives its own key, and is named after the barangay at its
   GPS position (e.g. *Barangay Carmen*, OpenStreetMap). Moving it renames it.
-- **Team admin**: the team signs in under **Settings → Team admin** with a shared passcode
+- **Admin login**: the team logs in from the small **Admin login** link at the bottom of Settings, with a shared passcode
   (`ADMIN_PASSCODE`) to rename stations, set alert thresholds, acknowledge alerts, and remove stations
   (or remove **and block** a lost or stolen device).
 - **Overview**: the worst air right now, stations online, active alerts and the worst station at a glance
@@ -77,9 +77,10 @@ The simulator adds 3 placeholder stations ("Station 1 (placeholder)", …) the s
 joins, loads 48 h of history and then streams live data. Leave out `--profile simulator` to run without
 fake data, and remove the placeholders (station ⚙ → Remove station) once your real stations are running.
 
-### Team admin
+### Admin login
 
-Go to **Settings → Team admin** and enter the `ADMIN_PASSCODE` from `.env`. Signed in, every station gets
+Go to **Settings → Admin login** (small link at the bottom, or open `/admin`) and enter the
+`ADMIN_PASSCODE` from `.env`. Logged in, every station gets
 a ⚙ button (rename, alert thresholds, GPS naming on/off, remove, remove and block) and alerts get an
 **Acknowledge** button. Share the passcode only within the team; change it in `.env` and run
 `docker compose up -d` to lock everyone out again.
@@ -99,7 +100,7 @@ a ⚙ button (rename, alert thresholds, GPS naming on/off, remove, remove and bl
 
 ### Remove a station
 
-Signed in as the team: open the station → ⚙ → **Remove station**. If its device is still switched on it
+Logged in as admin: open the station → ⚙ → **Remove station**. If its device is still switched on it
 will join again as a new station; use **Remove and block device** for hardware that should never come
 back. Without the app, from the project folder:
 
@@ -233,7 +234,7 @@ the server stays the same.
 Base URL `https://<host>/api/v1`. JSON everywhere. Reading is public; team-only endpoints need
 `Authorization: Bearer <token>` from `/admin/login` (otherwise `401`).
 
-### Team admin
+### Admin login
 | Method | Path | Body / notes |
 |---|---|---|
 | POST | `/admin/login` | `{passcode}` → `{token}` (rate-limited) |

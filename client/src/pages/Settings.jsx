@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAdmin } from '../auth.jsx';
 import { useUi } from '../components/ui.jsx';
 import { ConnectionPill, PageHeader } from '../components/Layout.jsx';
@@ -13,57 +13,25 @@ const THEMES = [
   { key: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
-/** Team sign-in with the shared admin passcode (there are no personal accounts). */
-function TeamAdmin() {
-  const { isAdmin, signIn, signOut } = useAdmin();
+/** Admin status for the team; the login itself is a small link at the bottom of Settings. */
+function AdminSection() {
+  const { isAdmin, signOut } = useAdmin();
   const { toast } = useUi();
-  const [passcode, setPasscode] = useState('');
-  const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await signIn(passcode);
-      setPasscode('');
-      toast('Signed in as the Ginhawa team');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  if (!isAdmin) return null;
   return (
     <section className="group">
-      <h2 className="group-title">Team admin</h2>
-      {isAdmin ? (
-        <>
-          <div className="group-body">
-            <div className="row">
-              <span>Signed in as the Ginhawa team</span>
-              <span className="badge badge-brand">Admin</span>
-            </div>
-            <button className="row row-button row-danger" onClick={signOut}>Sign out</button>
-          </div>
-          <p className="group-footer">
-            Open a station and tap ⚙ to rename it, set its alert thresholds or remove it. To add a station, flash the
-            Ginhawa firmware onto it and switch it on: it joins and names itself from its GPS location.
-          </p>
-        </>
-      ) : (
-        <>
-          <form className="group-body admin-form" onSubmit={submit}>
-            <input type="password" placeholder="Team passcode" value={passcode} onChange={(e) => setPasscode(e.target.value)}
-              autoComplete="current-password" aria-label="Team passcode" required />
-            <button className="btn btn-primary" disabled={busy}>{busy ? 'Checking…' : 'Sign in'}</button>
-            {error && <p className="error" role="alert">{error}</p>}
-          </form>
-          <p className="group-footer">For the Ginhawa team only. Everyone else can use the app without signing in.</p>
-        </>
-      )}
+      <h2 className="group-title">Admin</h2>
+      <div className="group-body">
+        <div className="row">
+          <span>Logged in as admin</span>
+          <span className="badge badge-brand">Admin</span>
+        </div>
+        <button className="row row-button row-danger" onClick={() => { signOut(); toast('Logged out'); }}>Log out</button>
+      </div>
+      <p className="group-footer">
+        Open a station and tap ⚙ to rename it, set its alert thresholds or remove it. To add a station, flash the
+        Ginhawa firmware onto it and switch it on: it joins and names itself from its GPS location.
+      </p>
     </section>
   );
 }
@@ -71,6 +39,7 @@ function TeamAdmin() {
 export default function Settings() {
   const { devices } = useLive();
   const { pref, setPref } = useTheme();
+  const { isAdmin } = useAdmin();
 
   return (
     <>
@@ -95,7 +64,7 @@ export default function Settings() {
         <p className="group-footer">“System” follows your phone's light or dark setting.</p>
       </section>
 
-      <TeamAdmin />
+      <AdminSection />
 
       <section className="group">
         <h2 className="group-title">Network</h2>
@@ -116,6 +85,11 @@ export default function Settings() {
         </div>
       </section>
 
+      {!isAdmin && (
+        <p className="admin-link">
+          <Link to="/admin">Admin login</Link>
+        </p>
+      )}
     </>
   );
 }

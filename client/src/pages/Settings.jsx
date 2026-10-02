@@ -95,6 +95,8 @@ export default function Settings() {
         <p className="group-footer">“System” follows your phone's light or dark setting.</p>
       </section>
 
+      <TeamAdmin />
+
       <section className="group">
         <h2 className="group-title">Network</h2>
         <div className="group-body">
@@ -114,7 +116,6 @@ export default function Settings() {
         </div>
       </section>
 
-      <TeamAdmin />
     </>
   );
 }

@@ -17,33 +17,31 @@ Companion to `03-circuit-schematic.drawio` / `.png` (paste this as a table under
    R3/R4 pull the bus up to 3.3 V; SEN55 I/O is 3.3 V compatible.
 6. **U3 (ESP32 DevKit)** is powered from U2 through its 3V3 pin. Leave VIN unconnected and unplug
    USB in the field (USB 5 V would back-feed the 3.3 V rail through the on-board regulator).
-7. **U6 (A7670 LTE)** runs directly from VBAT (3.4–4.2 V) and draws ~2 A peaks while transmitting;
-   C2 goes right at its VBAT pin. Buy a breakout with 3.3 V UART level shifting and check that its band
-   list includes B1, B3 and B28 (Globe / Smart). The firmware keeps it off while Wi-Fi works and does not
-   start it below 3.5 V.
-8. **U7 (GPS)** is powered through Q1 (P-MOSFET high-side switch). IO27 LOW turns it on; R7 keeps it off
-   during boot. The firmware powers it for up to 90 s every 15 minutes.
+7. **U6 (A7670SA, LTE + GNSS)** runs directly from VBAT (3.4–4.2 V) and draws ~2 A peaks while transmitting;
+   C2 goes right at its VBAT pin. Buy it on a breakout with a nano-SIM slot, 3.3 V UART level shifting and
+   antenna connectors (LTE on MAIN, GNSS on GNSS), and check that it is the GNSS version (A7670SA-FASE).
+   Its bands include B1, B3 and B28 (Globe / Smart). The firmware keeps the modem off while Wi-Fi works,
+   switches it on for up to 2 minutes every 15 minutes for a GPS fix, and does not start it below 3.5 V.
+8. **No separate GPS module and no status LEDs:** GPS comes from U6, so GPIO25–27, IO18 and IO19 are free.
 9. **Pins to avoid on the DevKit:** strapping pins IO0, IO2, IO5, IO12, IO15 and flash pins IO6–IO11.
-10. **Wiring:** PV and battery wiring ≥ 18 AWG; keep the SEN55 cable short.
+10. **Wiring:** PV and battery wiring 18 AWG silicone, signal wiring 22 AWG; keep the SEN55 cable short.
+11. **MT3608 (U5):** adjust it to 5.0 V with a multimeter *before* connecting the SEN55 (5 V ±10%).
+12. **Battery pack:** the 3-cell holder connects the cells in parallel; do not solder directly onto the cells.
 
 ## Bill of materials
 | Ref | Part | Qty |
 |---|---|---|
-| PV1 | Solar panel, 6 V 6 W | 1 |
-| U1 | CN3791 1-cell Li-ion solar charger module, 4.2 V | 1 |
-| F1 | Fuse 5 A + inline holder | 1 |
-| BT1 | 18650 Li-ion cells 3.7 V 3000 mAh (×3, parallel) + 1S BMS + 3-cell holder | 1 set |
-| U2 | Buck-boost module, 3.3 V out, ≥1 A (e.g. TPS63020-based) | 1 |
-| U5 | Boost module, 5 V out (MT3608) | 1 |
-| C2 | Low-ESR electrolytic capacitor, 1000 µF 10 V | 1 |
+| PV1 | Solar panel, 6 V 6 W monocrystalline | 1 |
+| U1 | CN3791 1-cell Li-ion solar charger module (6 V panel, 4.2 V charge) | 1 |
+| F1 | 5 A blade fuse + 16 AWG waterproof inline holder | 1 |
+| BT1 | Samsung INR18650-30Q 3000 mAh (×3, parallel) + 1S 10 A BMS + 3-cell parallel holder | 1 set |
+| U2 | TPS63802 buck-boost module, 3.3 V out | 1 |
+| U5 | MT3608 boost module, set to 5.0 V | 1 |
+| C2 | Low-ESR electrolytic capacitor, 1000 µF 10–16 V | 1 |
 | U3 | ESP32 DevKit V1 (ESP32-WROOM-32), already owned | 1 |
-| U6 | SIMCom A7670 4G LTE Cat-1 breakout + nano-SIM | 1 |
-| ANT1 | 4G LTE antenna, SMA + IPEX pigtail | 1 |
-| U7 | GPS module ATGM336H (or u-blox NEO-M8N) with patch antenna | 1 |
-| Q1 | P-channel MOSFET AO3401 (SOT-23 on adapter, or module) | 1 |
+| U6 | SIMCom A7670SA (LTE + GNSS) breakout + nano-SIM | 1 |
+| ANT1, ANT2 | LTE antenna + GNSS antenna | 1 set |
 | U4 | INA219 current / voltage sensor module | 1 |
 | J1 | Sensirion SEN55 + JST GHR-06V cable | 1 |
 | R3, R4 | Resistor 4.7 kΩ | 2 |
-| R7 | Resistor 10 kΩ | 1 |
-| R5, R6 | Resistor 220 Ω | 2 |
-| D1, D2 | LED 5 mm, red / green | 2 |
+| — | 18 AWG and 22 AWG silicone wire, PG7 cable glands, PG7 vent, perfboard, headers, standoffs | — |

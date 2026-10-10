@@ -76,13 +76,13 @@ function makeGenerator(site) {
   let soc = 0.7; // battery state of charge
   let lastTime = null;
   return (date) => {
-    // Battery: 6 W panel by day (Manila time), ~0.31 W load on Wi-Fi (~0.48 W on LTE),
+    // Battery: 6 W panel by day (Manila time), ~0.34 W load on Wi-Fi (~0.51 W on LTE),
     // 3 x 18650 in parallel (3.7 V, 9 Ah, ~33 Wh).
     const hours = lastTime ? Math.min(1, (date - lastTime) / 3600e3) : 0;
     lastTime = date;
     const hLocal = (date.getUTCHours() + 8 + date.getUTCMinutes() / 60) % 24;
     const sun = Math.max(0, Math.sin((Math.PI * (hLocal - 6)) / 12));
-    const loadW = site.network === 'lte' ? 0.48 : 0.31;
+    const loadW = site.network === 'lte' ? 0.51 : 0.34;
     let netW = 6 * 0.75 * sun * (0.7 + 0.3 * Math.random()) - loadW;
     if (soc >= 0.999 && netW > 0) netW = 0; // charger stops at full
     soc = Math.min(1, Math.max(0.05, soc + (netW * hours) / 33.3));

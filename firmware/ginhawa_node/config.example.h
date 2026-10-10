@@ -35,8 +35,8 @@
 // If it is not found at start-up, battery data is simply omitted.
 #define INA219_ADDR       0x40
 
-// ---- 4G LTE fallback: SIMCom A7670-series breakout (3.3 V logic) on UART2 ----
-// Set LTE_ENABLED to 0 if the station has no LTE module.
+// ---- SIMCom A7670SA breakout (4G LTE + GNSS, 3.3 V logic) on UART2 ----
+// Set LTE_ENABLED to 0 if the station has no modem (then there is no LTE fallback and no GPS).
 #define LTE_ENABLED     1
 #define LTE_RX_PIN      16   // ESP32 RX2  <- module TXD
 #define LTE_TX_PIN      17   // ESP32 TX2  -> module RXD
@@ -45,18 +45,13 @@
 #define LTE_MIN_BATTERY_V  3.5       // below this the modem is not started (it needs >= 3.4 V)
 #define WIFI_RETRY_MS   600000       // while on LTE, try Wi-Fi again every 10 minutes
 
-// ---- GPS: ATGM336H / u-blox NEO module on UART1, powered through a P-MOSFET ----
+// GPS uses the GNSS receiver built into the A7670SA (GNSS antenna on the module's GNSS connector).
 #define GPS_ENABLED     1
-#define GPS_RX_PIN      25   // ESP32 <- GPS TX
-#define GPS_TX_PIN      26   // ESP32 -> GPS RX
-#define GPS_POWER_PIN   27   // LOW = GPS powered (AO3401 gate; 10 kΩ pull-up keeps it off at boot)
-#define GPS_BAUD        9600
 #define GPS_INTERVAL_MS 900000  // look for a fix every 15 minutes
-#define GPS_TIMEOUT_MS   90000  // give up after 90 s (e.g. mounted under a roof)
+#define GPS_TIMEOUT_MS  120000  // give up after 2 minutes (e.g. mounted under a roof)
 
-// Status LEDs (-1 to disable). Green = good, both = moderate, red = unhealthy.
-// Pins used above: 4, 16, 17, 21, 22 (I2C), 25, 26, 27. Avoid strapping pins 0, 2, 5, 12, 15
-// and flash pins 6-11.
-#define LED_RED_PIN    18
-#define LED_GREEN_PIN  19
+// Optional status LEDs (-1 = none; the compact station has none). Green = good, both = moderate, red = unhealthy.
+// Pins used above: 4, 16, 17, 21, 22 (I2C). Avoid strapping pins 0, 2, 5, 12, 15 and flash pins 6-11.
+#define LED_RED_PIN    -1
+#define LED_GREEN_PIN  -1
 #define BUZZER_PIN     -1

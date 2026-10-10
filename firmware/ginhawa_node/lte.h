@@ -1,4 +1,4 @@
-// 4G LTE fallback through a SIMCom A7670-series module, using the module's built-in HTTP(S)
+// 4G LTE fallback and GNSS (GPS) through a SIMCom A7670SA module (the GNSS version), using the module's built-in HTTP(S)
 // AT commands (AT+HTTPINIT / HTTPPARA / HTTPDATA / HTTPACTION / HTTPREAD).
 // Bench-test with the exact breakout you buy: command replies can differ between firmware versions.
 #pragma once
@@ -40,19 +40,24 @@ void begin() {
   at.begin(115200, SERIAL_8N1, LTE_RX_PIN, LTE_TX_PIN);
 }
 
+// Power the modem on (no network needed: also used for GNSS while the station is on Wi-Fi).
+bool powerOn() {
+  if (powered) return true;
+  if (!cmd("AT", "OK", 500)) {
+    pulsePwrKey();
+    bool ok = false;
+    for (int i = 0; i < 20 && !ok; i++) ok = cmd("AT", "OK", 1000);
+    if (!ok) { Serial.println("LTE: modem not responding"); return false; }
+  }
+  powered = true;
+  cmd("ATE0");
+  cmd(String("AT+CGDCONT=1,\"IP\",\"") + LTE_APN + "\"");
+  return true;
+}
+
 // Power the modem on and wait until it is registered on the LTE network.
 bool up() {
-  if (!powered) {
-    if (!cmd("AT", "OK", 500)) {
-      pulsePwrKey();
-      bool ok = false;
-      for (int i = 0; i < 20 && !ok; i++) ok = cmd("AT", "OK", 1000);
-      if (!ok) { Serial.println("LTE: modem not responding"); return false; }
-    }
-    powered = true;
-    cmd("ATE0");
-    cmd(String("AT+CGDCONT=1,\"IP\",\"") + LTE_APN + "\"");
-  }
+  if (!powerOn()) return false;
   for (int i = 0; i < 30; i++) {  // up to ~60 s for registration
     String r;
     cmd("AT+CEREG?", "OK", 2000, &r);
@@ -61,6 +66,48 @@ bool up() {
   }
   Serial.println("LTE: not registered");
   return false;
+}
+
+// ---- GNSS (built into the A7670SA) ----
+
+void gnssOn() {
+  cmd("AT+CVAUXS=1");                          // power an active GNSS antenna (ignored if not supported)
+  cmd("AT+CGNSSPWR=1", "OK", 5000);            // the receiver reports "+CGNSSPWR: READY!" when it is up
+}
+
+void gnssOff() { cmd("AT+CGNSSPWR=0", "OK", 3000); }
+
+// ddmm.mmmm (NMEA style) -> decimal degrees
+double nmeaToDeg(const String &v, const String &hemi) {
+  double x = v.toDouble();
+  int deg = (int)(x / 100);
+  double d = deg + (x - deg * 100) / 60.0;
+  return (hemi == "S" || hemi == "W") ? -d : d;
+}
+
+// One position query. Returns true with lat/lon (and UTC date/time "ddmmyy","hhmmss") once there is a fix.
+// Reply: +CGPSINFO: 0828.633100,N,12438.754000,E,021026,061530.0,25.0,0.0,0  (empty fields = no fix yet)
+bool gnssRead(double &lat, double &lon, String &date, String &time) {
+  String r;
+  if (!cmd("AT+CGPSINFO", "OK", 2000, &r)) return false;
+  int p = r.indexOf("+CGPSINFO:");
+  if (p < 0) return false;
+  String f[9];
+  int start = p + 10, n = 0;
+  for (int i = start; i <= (int)r.length() && n < 9; i++) {
+    if (i == (int)r.length() || r[i] == ',' || r[i] == '\r' || r[i] == '\n') {
+      f[n++] = r.substring(start, i);
+      start = i + 1;
+      if (i < (int)r.length() && (r[i] == '\r' || r[i] == '\n')) break;
+    }
+  }
+  for (auto &x : f) x.trim();
+  if (n < 6 || f[0].length() == 0 || f[2].length() == 0) return false;
+  lat = nmeaToDeg(f[0], f[1]);
+  lon = nmeaToDeg(f[2], f[3]);
+  date = f[4];
+  time = f[5];
+  return true;
 }
 
 void down() {

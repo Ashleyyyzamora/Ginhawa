@@ -1,0 +1,61 @@
+GINHAWA - UPDATED SHOPPING LIST (ONE STATION)
+Estimated prices from local online sellers (Shopee/Lazada). Check current listings before ordering.
+
+Already have: Sensirion SEN55 sensor, ESP32 DevKit V1.
+Removed from your list: 0.15 mm nickel strip (the holder connects the cells), AO3401A MOSFET and
+10 kOhm resistors (only needed for a separate GPS module), LEDs (no status lights).
+
+FROM YOUR LIST (KEEP)
+ 1. SIMCom A7670SA 4G LTE + GNSS module (FASE version, on a breakout board) - 1 ... P1,300 - P2,000
+ 2. LTE + GNSS antennas - 1 set ... P200 - P400
+ 3. 6 V 6 W monocrystalline solar panel - 1 ... P350 - P700
+ 4. CN3791 solar charger module (6 V panel, 4.2 V charge) - 1 ... P150 - P300
+ 5. Samsung INR18650-30Q 3000 mAh - 3 ... P750 - P1,200
+ 6. 1S 10A Li-ion BMS - 1 ... P40 - P100
+ 7. 3-cell 18650 parallel holder - 1 ... P40 - P100
+ 8. TPS63802 buck-boost module (3.3 V output) - 1 ... P150 - P300
+ 9. MT3608 boost module - 1 ... P40 - P80
+10. INA219 power monitor module - 1 ... P150 - P250
+11. 5A blade fuse - 1 ... P10 - P30
+12. 16 AWG waterproof inline fuse holder - 1 ... P50 - P120
+13. 18 AWG stranded silicone wire - 4 m ... P120 - P250
+14. 22 AWG stranded silicone wire - 5 m ... P100 - P200
+15. SEN5x 6-pin JST GHR-06V-S cable (skip if it came with your sensor) - 1 ... P150 - P350
+16. 4.7 kΩ resistors - 2 ... P5 - P20
+17. 1000 µF capacitor, low-ESR, 10-16 V - 1 ... P10 - P30
+18. PG7 waterproof cable glands - 4 ... P40 - P100
+    Subtotal ... P3,655 - P6,530
+
+ADD TO YOUR ORDER (MISSING)
+19. PG7 breather vent plug (lets the box breathe without letting water in) - 1 ... P60 - P150
+20. Perfboard / prototype PCB - 1 ... P30 - P80
+21. Male and female pin headers - 1 set ... P40 - P80
+22. M3 nylon standoffs and screws - 1 kit ... P100 - P200
+23. Heat-shrink tubing assortment - 1 pack ... P80 - P150
+24. Silica gel packs - 1 pack ... P30 - P60
+25. Stainless steel insect mesh (for the shield openings) - small piece ... P50 - P100
+26. Nano-SIM with data, Globe or Smart (2 months) - 1 ... P600 - P1,000
+    Subtotal ... P990 - P1,820
+
+ON HOLD (buy later)
+27. IP65 enclosure, 150 x 100 x 70 mm - 1 ... P250 - P550
+28. 3D-printed radiation shield and brackets - 1 ... P300 - P800
+29. Mounting hardware (pole clamps, U-bolts, screws) - 1 set ... P300 - P600
+    Subtotal ... P850 - P1,950
+
+TOOLS (only if the group doesn't have them)
+    Soldering iron and solder ... P300 - P600
+    Multimeter (needed to set the MT3608 to 5.0 V) ... P300 - P700
+    Micro-USB data cable for the ESP32 ... P100
+
+TOTAL TO BUY NOW (your list + missing items) ... P4,645 - P8,350
+TOTAL INCLUDING ON-HOLD ITEMS ................... P5,495 - P10,300
+Claude Pro (1 month, US$20, optional) ........... approx. P1,150
+
+BEFORE YOU PAY
+- A7670SA: confirm with the seller it is the GNSS version (A7670SA-FASE) on a breakout board with a
+  nano-SIM slot, 3.3 V serial pins and two antenna connectors (MAIN for LTE, GNSS for GPS).
+- TPS63802: must be the 3.3 V output version (or adjustable).
+- MT3608: set it to 5.0 V with the multimeter BEFORE connecting the SEN55.
+- Samsung 30Q: buy from a trusted seller; fakes are common.
+- Do not solder directly onto the 18650 cells; use the holder.

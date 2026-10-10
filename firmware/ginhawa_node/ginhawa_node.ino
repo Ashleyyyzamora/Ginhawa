@@ -1,24 +1,25 @@
 /*
  * Ginhawa monitoring station: ESP32 DevKit V1 (ESP32-WROOM-32) + Sensirion SEN55 + INA219
- *   + SIMCom A7670 4G LTE module (fallback) + ATGM336H GPS, on 3 x 18650 Li-ion cells (1S3P).
+ *   + SIMCom A7670SA 4G LTE module with built-in GNSS (GPS), on 3 x 18650 Li-ion cells (1S3P).
  *
  * Power-saving schedule (see docs/diagrams):
  *   - VOC index, NOx index, temperature and humidity: sampled every second
  *   - particles (PM1.0/2.5/4.0/10): the SEN55 fan and laser run 1 minute in every 5;
  *     the first 30 s after start-up are discarded, the rest are averaged
  *   - every minute: average the samples, read battery voltage/current, and upload
- *   - GPS: powered for up to 90 s every 15 minutes, then switched off
- *   - LTE modem: off while Wi-Fi works; started only when Wi-Fi is unavailable
+ *   - GPS (GNSS in the A7670SA): every 15 minutes the modem and its GNSS receiver are switched on
+ *     for up to 2 minutes, then off again
+ *   - LTE: the modem is used for uploads only when Wi-Fi is unavailable
  *
  * Wiring (see docs/diagrams/03-circuit-schematic and 03-circuit-notes.md):
  *   SEN55 pin 1 VDD -> 5 V boost, pin 2 GND, pin 3 SDA -> GPIO21, pin 4 SCL -> GPIO22,
  *   pin 5 SEL -> GND (I2C), pin 6 NC; 4.7 kΩ pull-ups from SDA/SCL to 3.3 V.
  *   INA219 on the same I2C bus (0x40), in series with the battery (+ = charging).
- *   LTE module: TXD -> GPIO16, RXD <- GPIO17, PWRKEY <- GPIO4, VBAT from the battery rail.
- *   GPS: TX -> GPIO25, RX <- GPIO26, 3.3 V switched by a P-MOSFET whose gate is GPIO27.
+ *   A7670SA: TXD -> GPIO16, RXD <- GPIO17, PWRKEY <- GPIO4, VBAT from the battery rail,
+ *   LTE antenna on MAIN and GNSS antenna on GNSS. No status LEDs.
  *
  * Libraries (Arduino Library Manager):
- *   "Sensirion I2C SEN5X" (+ "Sensirion Core"), "Adafruit INA219", "ArduinoJson" v7, "TinyGPSPlus"
+ *   "Sensirion I2C SEN5X" (+ "Sensirion Core"), "Adafruit INA219", "ArduinoJson" v7
  * Board: "ESP32 Dev Module" (esp32 by Espressif)
  *
  * First power-on: POST {API_BASE_URL}/api/v1/enroll with header X-Enroll-Secret and
@@ -39,7 +40,6 @@
 #include <ArduinoJson.h>
 #include <SensirionI2CSen5x.h>
 #include <Adafruit_INA219.h>
-#include <TinyGPSPlus.h>
 #include <sys/time.h>
 #include <Preferences.h>
 #include "config.h"
@@ -70,9 +70,9 @@ Acc aPm1, aPm25, aPm4, aPm10, aVoc, aNox, aTemp, aRh, aV, aA;
 unsigned long lastReport = 0, lastSample = 0, pmStartedAt = 0;
 bool pmOn = false;
 
-TinyGPSPlus gps;
-bool gpsOn = false;
-unsigned long gpsStartedAt = 0, lastGpsRun = 0;
+bool gpsOn = false;  // GNSS receiver in the A7670SA is running
+float lastBattV = NAN;  // last averaged battery voltage
+unsigned long gpsStartedAt = 0, lastGpsRun = 0, lastGpsPoll = 0;
 double fixLat = NAN, fixLon = NAN;  // new fix waiting to be attached to the next reading
 
 Preferences prefs;
@@ -113,38 +113,49 @@ void setPm(bool on) {
   if (on) pmStartedAt = millis();
 }
 
-// ---------------------------------------------------------------- GPS
+// ---------------------------------------------------------------- GPS (GNSS in the A7670SA)
 
-void setGps(bool on) {
-  if (GPS_POWER_PIN >= 0) digitalWrite(GPS_POWER_PIN, on ? LOW : HIGH);  // P-MOSFET: LOW = on
-  gpsOn = on;
-  if (on) gpsStartedAt = millis();
+void stopGps() {
+  lte::gnssOff();
+  gpsOn = false;
+  if (!onLte) lte::down();  // the modem is only kept on while uploads go over LTE
 }
 
+// Called every loop: every GPS_INTERVAL_MS, switch the modem's GNSS on, poll it every 2 s until there is
+// a fix or GPS_TIMEOUT_MS has passed, then switch it off. Sampling continues in between.
 void serviceGps(unsigned long now) {
-  if (!GPS_ENABLED) return;
+  if (!GPS_ENABLED || !LTE_ENABLED) return;
   if (!gpsOn) {
-    if (lastGpsRun == 0 || now - lastGpsRun >= GPS_INTERVAL_MS) { lastGpsRun = now ? now : 1; setGps(true); }
+    if (lastGpsRun != 0 && now - lastGpsRun < GPS_INTERVAL_MS) return;
+    lastGpsRun = now ? now : 1;
+    if (!isnan(lastBattV) && lastBattV < LTE_MIN_BATTERY_V) return;  // too low to start the modem
+    if (!lte::powerOn()) return;
+    lte::gnssOn();
+    gpsOn = true;
+    gpsStartedAt = lastGpsPoll = now;
     return;
   }
-  while (Serial1.available()) gps.encode(Serial1.read());
-  bool fix = gps.location.isValid() && gps.location.age() < 2000 && gps.satellites.value() >= 4;
-  if (fix) {
-    fixLat = gps.location.lat();
-    fixLon = gps.location.lng();
-    if (!clockSynced() && gps.date.isValid() && gps.time.isValid()) {  // no NTP (e.g. on LTE): use GPS time
+  if (now - lastGpsPoll < 2000) return;
+  lastGpsPoll = now;
+  double lat, lon;
+  String date, tm;
+  if (lte::gnssRead(lat, lon, date, tm)) {
+    fixLat = lat;
+    fixLon = lon;
+    if (!clockSynced() && date.length() == 6 && tm.length() >= 6) {  // no NTP (e.g. on LTE): use GPS time
       struct tm t = {};
-      t.tm_year = gps.date.year() - 1900; t.tm_mon = gps.date.month() - 1; t.tm_mday = gps.date.day();
-      t.tm_hour = gps.time.hour(); t.tm_min = gps.time.minute(); t.tm_sec = gps.time.second();
+      t.tm_mday = date.substring(0, 2).toInt(); t.tm_mon = date.substring(2, 4).toInt() - 1;
+      t.tm_year = date.substring(4, 6).toInt() + 100;
+      t.tm_hour = tm.substring(0, 2).toInt(); t.tm_min = tm.substring(2, 4).toInt(); t.tm_sec = tm.substring(4, 6).toInt();
       setenv("TZ", "UTC0", 1); tzset();
       struct timeval tv = {mktime(&t), 0};
       settimeofday(&tv, nullptr);
     }
-    Serial.printf("GPS fix %.6f, %.6f (%u satellites)\n", fixLat, fixLon, (unsigned)gps.satellites.value());
-    setGps(false);
+    Serial.printf("GPS fix %.6f, %.6f\n", fixLat, fixLon);
+    stopGps();
   } else if (now - gpsStartedAt >= GPS_TIMEOUT_MS) {
     Serial.println("GPS: no fix, keeping the last known location");
-    setGps(false);
+    stopGps();
   }
 }
 
@@ -240,7 +251,7 @@ bool upload(float battV) {
     lastWifiTry = now;
     ensureWifi();
     if (WiFi.status() == WL_CONNECTED) {
-      if (onLte) { Serial.println("Wi-Fi is back: LTE modem off"); lte::down(); }
+      if (onLte && !gpsOn) { Serial.println("Wi-Fi is back: LTE modem off"); lte::down(); }
       onLte = false;
     } else if (LTE_ENABLED) {
       WiFi.disconnect(true);
@@ -289,12 +300,7 @@ void setup() {
   sen5x.setTemperatureOffsetSimple(2.0);  // enclosure heat; tune against a thermometer
   setPm(true);                            // start with a particle window
 
-  if (GPS_ENABLED) {
-    pinMode(GPS_POWER_PIN, OUTPUT);
-    setGps(false);
-    Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-  }
-  if (LTE_ENABLED) lte::begin();
+  if (LTE_ENABLED) lte::begin();  // also provides GPS
 
   prefs.begin("ginhawa", false);
   deviceKey = prefs.getString("key", "");
@@ -343,6 +349,7 @@ void loop() {
       fixLat = fixLon = NAN;
     }
     float battV = aV.avg();
+    if (!isnan(battV)) lastBattV = battV;
     aPm1 = aPm25 = aPm4 = aPm10 = aVoc = aNox = aTemp = aRh = aV = aA = Acc();
     upload(battV);
   }

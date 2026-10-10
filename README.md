@@ -182,25 +182,24 @@ To serve HTTPS straight from Node (no Caddy), set `TLS_KEY_FILE` and `TLS_CERT_F
 ### Compact solar station (the design in the proposal)
 
 One compact unit (≈150 × 110 × 260 mm, ≈0.8 kg) plus a small solar panel, built around a standard
-**ESP32 DevKit V1**. Full wiring: `docs/diagrams/03-circuit-schematic.png`; parts list:
+**ESP32 DevKit V1** and an **A7670SA** LTE module with built-in GPS. No status LEDs. Full wiring: `docs/diagrams/03-circuit-schematic.png`; parts list:
 `docs/diagrams/03-circuit-notes.md`.
 
 | Part | Approx. price | Notes |
 |---|---|---|
 | ESP32 DevKit V1 (ESP32-WROOM-32) | already owned | MCU + Wi-Fi |
 | Sensirion **SEN55** | ₱2,000–2,800 | PM1/2.5/4/10 + VOC + NOx + T/RH over I2C |
-| SIMCom **A7670** 4G LTE Cat-1 breakout + LTE antenna | ₱1,350–2,100 | fallback when there is no Wi-Fi |
-| GPS module ATGM336H + AO3401 switch | ₱250–450 | position every 15 min |
+| SIMCom **A7670SA** (4G LTE + GNSS) breakout + LTE/GNSS antennas | ₱1,500–2,400 | LTE fallback and GPS |
 | INA219 module | ₱150–250 | battery voltage and current |
-| 3× 18650 Li-ion 3000 mAh + 1S BMS + holder | ₱850–1,450 | 3.7 V 9 Ah (≈33 Wh) pack, ≈0.15 kg |
+| 3× Samsung 30Q 18650 + 1S BMS + 3-cell holder | ₱830–1,400 | 3.7 V 9 Ah (≈33 Wh) pack, ≈0.15 kg |
 | CN3791 solar charger + 6 V 6 W panel | ₱500–1,000 | recharges the pack |
-| 3.3 V buck-boost + 5 V boost (MT3608) + 1000 µF | ₱200–470 | ESP32/GPS and SEN55 supplies |
+| TPS63802 3.3 V buck-boost + MT3608 5 V boost + 1000 µF | ₱200–410 | ESP32 and SEN55 supplies |
 | IP65 box 150×100×70 mm + 3D-printed radiation shield | ₱550–1,350 | enclosure |
 
-**Power-saving schedule** (≈7.5 Wh/day on Wi-Fi, ≈11.6 Wh/day on LTE; ≈3.5 / 2.3 days without sun):
+**Power-saving schedule** (≈8.1 Wh/day on Wi-Fi, ≈12.2 Wh/day on LTE; ≈3.3 / 2.2 days without sun):
 VOC, NOx, temperature and humidity are sampled every second; the SEN55 fan and laser run **1 minute
-in every 5** for particles; the station averages and uploads **once a minute**. The GPS is powered for
-up to 90 s every 15 minutes, and the LTE modem is started only when Wi-Fi is unavailable. The server
+in every 5** for particles; the station averages and uploads **once a minute**. The A7670SA's built-in GPS
+is switched on for up to 2 minutes every 15 minutes, and LTE uploads are used only when Wi-Fi is unavailable. The server
 carries the latest particle reading forward for up to 10 minutes so the AQI stays continuous, and marks
 a station offline after 5 minutes of silence.
 
@@ -209,10 +208,10 @@ Wiring and setup are at the top of `ginhawa_node.ino`. Steps:
 1. Copy `config.example.h` to `config.h` and fill in Wi-Fi, server URL, `ENROLL_SECRET` (from `.env`) and
    the SIM's APN. Optionally set `STATION_NAME` / `STATION_LANDMARK`; otherwise the GPS names it.
 2. Switch it on: it adds itself to the app (see *Connecting the real sensor*).
-3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219*, *ArduinoJson* and *TinyGPSPlus*,
+3. Install the libraries *Sensirion I2C SEN5X*, *Adafruit INA219* and *ArduinoJson*,
    select the board **ESP32 Dev Module** and upload.
 
-The LTE upload uses the A7670's built-in HTTP(S) AT commands (`lte.h`); test it on the bench with the
+The LTE upload uses the A7670SA's built-in HTTP(S) AT commands and GPS uses its GNSS commands (`lte.h`); test it on the bench with the
 exact breakout you buy. LTE needs the server on a public address (domain or VPS).
 
 ### Budget alternative
